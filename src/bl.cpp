@@ -318,7 +318,7 @@ void bl_init(void)
 
   if (wakeup_reason != ESP_SLEEP_WAKEUP_TIMER)
   {
-    Log.info("%s [%d]: Display TRMNL logo start\r\n", __FILE__, __LINE__);
+    Log.info("%s [%d]: Display ECHO logo start\r\n", __FILE__, __LINE__);
 
   
     display_show_image(storedLogoOrDefault(1), DEFAULT_IMAGE_SIZE, false);
@@ -326,7 +326,7 @@ void bl_init(void)
 
     need_to_refresh_display = 1;
     preferences.putBool(PREFERENCES_DEVICE_REGISTERED_KEY, false);
-    Log.info("%s [%d]: Display TRMNL logo end\r\n", __FILE__, __LINE__);
+    Log.info("%s [%d]: Display ECHO logo end\r\n", __FILE__, __LINE__);
     preferences.putString(PREFERENCES_FILENAME_KEY, "");
   }
 
@@ -1942,9 +1942,9 @@ static void getDeviceCredentials()
     // Check if running in local mode (empty filename = no cloud image)
     if (filename[0] == '\0')
     {
-      Log_info("[LOCAL] Local mode activated - scanning for TRMNL servers");
+      Log_info("[LOCAL] Local mode activated - scanning for Shadow Lab mesh servers");
 
-      // Try to discover local TRMNL server via mDNS
+      // Try to discover local server via mDNS
       char local_server_url[128];
       if (mdns_get_local_server_url(local_server_url, sizeof(local_server_url)))
       {
@@ -1957,7 +1957,7 @@ static void getDeviceCredentials()
       }
       else
       {
-        Log_info("[LOCAL] No local TRMNL server found - will scan in background");
+        Log_info("[LOCAL] No local server found - will scan in background");
       }
 
       // Continue to sleep - next refresh cycle will try local server

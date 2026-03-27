@@ -18,10 +18,21 @@
 
 #define LOG_MAX_NOTES_NUMBER 10
 
-// Shadow Lab: self-hosted OTA (bypasses BYOD OTA restriction)
-// Host firmware binaries at this URL, device checks on each wake cycle
+// ─── Shadow Lab Identity ────────────────────────────────────────────
+// Device codename: ECHO | Product: shadow-light
+// Role: Absolute display surface (SP-015) in the Shadow Lab mesh
+// Operator: Shadow Lab (shadowlab.cc)
+#define SHADOW_DEVICE_CODENAME "ECHO"
+#define SHADOW_PRODUCT_NAME "shadow-light"
+#define SHADOW_FIRMWARE_TAG "shadow-v" FW_VERSION_STRING
+
+// Self-hosted OTA (bypasses BYOD OTA restriction)
 #define SHADOW_OTA_URL "https://shadowlab.cc/firmware/xteink_x4.bin"
 #define SHADOW_OTA_ENABLED
+
+// Mesh integration — report to shadowlab.cc API on wake
+#define SHADOW_MESH_REPORT_URL "https://shadowlab.cc/api/echo/heartbeat"
+// #define SHADOW_MESH_REPORT_ENABLED  // uncomment when API endpoint is ready
 
 #define PREFERENCES_API_KEY "api_key"
 #define PREFERENCES_API_KEY_DEFAULT ""
@@ -41,7 +52,7 @@
 #define PREFERENCES_CONNECT_WIFI_RETRY_COUNT "wifi_retry"
 
 // mDNS and local server discovery
-#define PREFERENCES_NAMESPACE "trmnl_x4"
+#define PREFERENCES_NAMESPACE "shadow_echo"
 #define PREFERENCES_LOCAL_SERVER_URL "local_server"
 
 #define WIFI_CONNECTION_RSSI (-100)

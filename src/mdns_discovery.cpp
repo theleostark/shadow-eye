@@ -1,9 +1,9 @@
 /**
  * @file mdns_discovery.cpp
- * @brief Simplified mDNS discovery for TRMNL servers
+ * @brief mDNS discovery for Shadow Lab mesh + TRMNL servers
  *
- * Uses Arduino ESP32 mDNS library to discover local TRMNL content servers.
- * Devices advertising with "trmnl" in hostname will be discovered.
+ * Uses Arduino ESP32 mDNS library to discover local content servers.
+ * Advertises ECHO as a Shadow Lab mesh device via _shadowlab._tcp service.
  */
 
 #include "mdns_discovery.h"
@@ -54,11 +54,15 @@ bool mdns_discovery_init(void) {
         return false;
     }
 
-    // Set instance name
-    MDNS.setInstanceName("ECHO");
+    // Shadow Lab: ECHO device identity
+    MDNS.setInstanceName(SHADOW_DEVICE_CODENAME);
 
-    // Advertise HTTP service
+    // Advertise HTTP service + Shadow Lab mesh service
     MDNS.addService(MDNS_SERVICE_TYPE, MDNS_SERVICE_PROTO, 80);
+    MDNS.addService("shadowlab", "tcp", 80);
+    MDNS.addServiceTxt("shadowlab", "tcp", "device", SHADOW_DEVICE_CODENAME);
+    MDNS.addServiceTxt("shadowlab", "tcp", "product", SHADOW_PRODUCT_NAME);
+    MDNS.addServiceTxt("shadowlab", "tcp", "fw", SHADOW_FIRMWARE_TAG);
 
     s_mdns.initialized = true;
     log_i("[MDNS] Ready: %s.local", get_device_id());
