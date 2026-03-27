@@ -1,0 +1,142 @@
+/**
+ * @file mqtt_sprite_refactored.h
+ * @brief Refactored MQTT-based sprite display system
+ *
+ * Improvements:
+ * - Uses PROGMEM for string constants to save RAM
+ * - Smaller stack buffers for low-memory devices
+ * - Efficient state string lookup
+ * - Scoped preferences for automatic cleanup
+ * - Configurable via sprite_config_t
+ */
+
+#ifndef MQTT_SPRITE_REFACTORED_H
+#define MQTT_SPRITE_REFACTORED_H
+
+#include <Arduino.h>
+#include <Preferences.h>
+#include "sprite_config.h"
+
+// ============================================================
+// MESSAGE STRUCTURE (compact)
+// ============================================================
+
+typedef struct {
+    char message[64];      // Reduced from 128 to save RAM
+    sprite_state_t state;
+    uint8_t flags;         // Bit flags for efficiency
+} sprite_message_compact_t;
+
+// Message flags (bit field for compact storage)
+#define MSG_FLAG_HAS_MESSAGE 0x01
+#define MSG_FLAG_HAS_STATE   0x02
+#define MSG_FLAG_URGENT      0x04
+
+// ============================================================
+// MQTT CLIENT STATE
+// ============================================================
+
+typedef enum {
+    MQTT_STATE_DISCONNECTED = 0,
+    MQTT_STATE_CONNECTING,
+    MQTT_STATE_CONNECTED,
+    MQTT_STATE_ERROR
+} mqtt_client_state_t;
+
+/**
+ * @brief Get current MQTT state
+ */
+mqtt_client_state_t mqtt_sprite_get_state(void);
+
+/**
+ * @brief Get state as string (for debugging)
+ */
+const char* mqtt_sprite_state_string(mqtt_client_state_t state);
+
+// ============================================================
+// CORE API - Simplified
+// ============================================================
+
+/**
+ * @brief Initialize MQTT sprite system
+ * @param config Optional runtime config (uses defaults if NULL)
+ * @return true on success
+ */
+bool mqtt_sprite_init(const sprite_config_t* config);
+
+/**
+ * @brief Main loop handler - call frequently
+ * @return true if new message is available
+ */
+bool mqtt_sprite_loop(void);
+
+/**
+ * @brief Get latest message (non-blocking)
+ * @param msg Output message (compact format)
+ * @return true if new message was available
+ */
+bool mqtt_sprite_get_message(sprite_message_compact_t* msg);
+
+/**
+ * @brief Publish state to MQTT (optional feedback)
+ * @param state Current sprite state
+ * @param message Optional status message
+ * @return true if published successfully
+ */
+bool mqtt_sprite_publish_state(sprite_state_t state, const char* message);
+
+// ============================================================
+// CONFIGURATION API
+// ============================================================
+
+/**
+ * @brief Load config from preferences into provided struct
+ * @param config Output configuration
+ * @return true if config was loaded
+ */
+bool mqtt_sprite_load_config(sprite_config_t* config);
+
+/**
+ * @brief Save config to preferences
+ * @param config Configuration to save
+ * @return true if saved successfully
+ */
+bool mqtt_sprite_save_config(const sprite_config_t* config);
+
+/**
+ * @brief Enable/disable MQTT at runtime
+ * @param enabled true to enable
+ */
+void mqtt_sprite_set_enabled(bool enabled);
+
+/**
+ * @brief Check if MQTT is enabled
+ */
+bool mqtt_sprite_is_enabled(void);
+
+// ============================================================
+// CONNECTION INFO
+// ============================================================
+
+/**
+ * @brief Check if connected to broker
+ */
+bool mqtt_sprite_is_connected(void);
+
+/**
+ * @brief Get last error message
+ * @return Error string or NULL if no error
+ */
+const char* mqtt_sprite_get_error(void);
+
+/**
+ * @brief Force reconnection
+ */
+void mqtt_sprite_reconnect(void);
+
+/**
+ * @brief Disconnect and cleanup
+ */
+void mqtt_sprite_stop(void);
+
+#endif // MQTT_SPRITE_REFACTORED_H

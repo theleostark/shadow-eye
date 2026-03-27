@@ -18,6 +18,11 @@
 
 #define LOG_MAX_NOTES_NUMBER 10
 
+// Shadow Lab: self-hosted OTA (bypasses BYOD OTA restriction)
+// Host firmware binaries at this URL, device checks on each wake cycle
+#define SHADOW_OTA_URL "https://shadowlab.cc/firmware/xteink_x4.bin"
+#define SHADOW_OTA_ENABLED
+
 #define PREFERENCES_API_KEY "api_key"
 #define PREFERENCES_API_KEY_DEFAULT ""
 #define PREFERENCES_API_URL "api_url"
@@ -34,6 +39,10 @@
 #define PREFERENCES_LAST_SLEEP_TIME "last_sleep"
 #define PREFERENCES_CONNECT_API_RETRY_COUNT "retry_count"
 #define PREFERENCES_CONNECT_WIFI_RETRY_COUNT "wifi_retry"
+
+// mDNS and local server discovery
+#define PREFERENCES_NAMESPACE "trmnl_x4"
+#define PREFERENCES_LOCAL_SERVER_URL "local_server"
 
 #define WIFI_CONNECTION_RSSI (-100)
 

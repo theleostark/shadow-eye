@@ -1,0 +1,147 @@
+/**
+ * @file sprite_renderer_refactored.h
+ * @brief Refactored sprite rendering system
+ *
+ * Improvements:
+ * - Adaptable to different screen sizes
+ * - Reduced code duplication
+ * - Efficient memory usage
+ * - Hardware abstraction layer
+ */
+
+#ifndef SPRITE_RENDERER_REFACTORED_H
+#define SPRITE_RENDERER_REFACTORED_H
+
+#include <Arduino.h>
+#include "sprite_config.h"
+
+// ============================================================
+// DISPLAY ABSTRACTION
+// ============================================================
+
+/**
+ * @brief Display capabilities and limits
+ */
+typedef struct {
+    uint16_t width;
+    uint16_t height;
+    bool supports_partial;
+    bool supports_4gray;
+    bool needs_refresh;       // E-ink needs refresh after draw
+} display_caps_t;
+
+/**
+ * @brief Get display capabilities
+ * Adapts to actual hardware at runtime
+ */
+const display_caps_t* sprite_get_display_caps(void);
+
+// ============================================================
+// RENDERER CONFIG
+// ============================================================
+
+/**
+ * @brief Runtime renderer configuration
+ */
+typedef struct {
+    // Position (auto-centered if both are 0)
+    uint16_t x;
+    uint16_t y;
+
+    // Size (auto-scaled if width is 0)
+    uint16_t width;
+    uint16_t height;
+
+    // Flags
+    struct {
+        uint8_t auto_center : 1;    // Auto-center on screen
+        uint8_t auto_scale : 1;     // Scale to fit display
+        uint8_t clear_area : 1;     // Clear before drawing
+        uint8_t invert : 1;         // Invert colors
+        uint8_t reserved : 4;
+    } flags;
+
+} sprite_render_config_t;
+
+/**
+ * @brief Set renderer configuration
+ */
+void sprite_set_render_config(const sprite_render_config_t* config);
+
+/**
+ * @brief Get current renderer configuration
+ */
+void sprite_get_render_config(sprite_render_config_t* config);
+
+// ============================================================
+// CORE RENDERING API
+// ============================================================
+
+/**
+ * @brief Initialize renderer
+ * @return true on success
+ */
+bool sprite_renderer_init(void);
+
+/**
+ * @brief Display sprite for given state
+ * @param state Sprite state to display
+ * @return true on success
+ */
+bool sprite_display(sprite_state_t state);
+
+/**
+ * @brief Display sprite at specific position (one-shot)
+ * @param state Sprite state
+ * @param x X position
+ * @param y Y position
+ * @return true on success
+ */
+bool sprite_display_at(sprite_state_t state, uint16_t x, uint16_t y);
+
+/**
+ * @brief Clear sprite area
+ */
+void sprite_clear(void);
+
+/**
+ * @brief Check if renderer is ready
+ */
+bool sprite_is_ready(void);
+
+// ============================================================
+// ANIMATION API
+// ============================================================
+
+/**
+ * @brief Update animation frame
+ * Call this in main loop for animated sprites
+ * @return true if display was updated
+ */
+bool sprite_animate(void);
+
+/**
+ * @brief Set animation speed
+ * @param duration_ms Frame duration in milliseconds
+ */
+void sprite_set_animation_speed(uint16_t duration_ms);
+
+/**
+ * @brief Enable/disable animations
+ */
+void sprite_set_animation_enabled(bool enabled);
+
+// ============================================================
+// HARDWARE-SPECIFIC FUNCTIONS
+// ============================================================
+
+/**
+ * @brief Register hardware-specific drawing functions
+ * Call this once at startup if using custom display driver
+ */
+typedef bool (*sprite_draw_func_t)(const uint8_t* png_data, size_t size,
+                                   uint16_t x, uint16_t y, uint16_t w, uint16_t h);
+
+void sprite_register_draw_func(sprite_draw_func_t func);
+
+#endif // SPRITE_RENDERER_REFACTORED_H

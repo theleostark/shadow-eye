@@ -6,6 +6,7 @@
 #include <Preferences.h>
 #include <preferences_persistence.h>
 #include "DEV_Config.h"
+#include "epd_optimizations.h"
 #define MAX_BIT_DEPTH 8
 #ifndef BOARD_TRMNL_X
 #define BB_EPAPER
@@ -108,7 +109,10 @@ void display_init(void)
     Log_info("Saved temperature profile: %d", iTempProfile);
 #ifdef BB_EPAPER
     bbep.setPanelType(dpList[iTempProfile].OneBit); // must be set BEFORE calling initio
-    bbep.initIO(EPD_DC_PIN, EPD_RST_PIN, EPD_BUSY_PIN, EPD_CS_PIN, EPD_MOSI_PIN, EPD_SCK_PIN, 8000000);
+    // OPTIMIZATION: Use 20MHz SPI (SSD1677 max) for 2.5x faster data transfer
+    bbep.initIO(EPD_DC_PIN, EPD_RST_PIN, EPD_BUSY_PIN, EPD_CS_PIN, EPD_MOSI_PIN, EPD_SCK_PIN, 20000000);
+    // PHASE 2: Enable temperature compensation for waveform optimization
+    enable_temperature_compensation();
 #else
     bbep.initPanel(BB_PANEL_EPDIY_V7_16); //, 26000000);
     bbep.setPanelSize(1872, 1404, BB_PANEL_FLAG_MIRROR_X);
@@ -1333,7 +1337,12 @@ void display_show_image(uint8_t *image_buffer, int data_size, bool bWait)
         // After a partial update, the 4.26" 800x480 needs to be 'reset' to accept writes
         // This is only needed if the user pressed the WAKE button and there will be 2 updates
         // while the power is on
-        bbep.initIO(EPD_DC_PIN, EPD_RST_PIN, EPD_BUSY_PIN, EPD_CS_PIN, EPD_MOSI_PIN, EPD_SCK_PIN, 8000000);
+        // OPTIMIZATION: Use 20MHz SPI (SSD1677 max) for 2.5x faster data transfer
+        // BUGFIX: Reset workaround flag to prevent endless re-init
+        Log_info("4.26\" workaround: Re-initializing SPI after partial refresh");
+        bbep.initIO(EPD_DC_PIN, EPD_RST_PIN, EPD_BUSY_PIN, EPD_CS_PIN, EPD_MOSI_PIN, EPD_SCK_PIN, 20000000);
+        delay(10); // Small delay for SPI to stabilize
+        i426Workaround = 0; // CRITICAL: Reset flag after use
     }
 #endif // BB_EPAPER
     if (isPNG == true && data_size < MAX_IMAGE_SIZE)
@@ -1388,9 +1397,11 @@ void display_show_image(uint8_t *image_buffer, int data_size, bool bWait)
         Log_info("Saving new temperature profile (%d) to FLASH", iTempProfile);
         preferences.putUInt(PREFERENCES_TEMP_PROFILE, iTempProfile);
     }
-    if ((iUpdateCount & 7) == 0 || apiDisplayResult.response.maximum_compatibility == true) {
+    // OPTIMIZATION: Reduced full refresh frequency (every 16 partials vs 8)
+    // With optimized waveforms and better partial quality, we can refresh less often
+    if ((iUpdateCount & 0xF) == 0 || apiDisplayResult.response.maximum_compatibility == true) {
         Log_info("%s [%d]: Forcing full refresh; desired refresh mode was: %d\r\n", __FILE__, __LINE__, iRefreshMode);
-        iRefreshMode = REFRESH_FULL; // force full refresh every 8 partials
+        iRefreshMode = REFRESH_FULL; // force full refresh every 16 partials
     }
     int refresh_seconds = preferences.getUInt(PREFERENCES_SLEEP_TIME_KEY, SLEEP_TIME_TO_SLEEP);
     if (refresh_seconds >= 30*60 && iRefreshMode == REFRESH_PARTIAL) {
@@ -1400,9 +1411,33 @@ void display_show_image(uint8_t *image_buffer, int data_size, bool bWait)
     }
     if (bbep.capabilities() & (BBEP_4COLOR | BBEP_3COLOR | BBEP_7COLOR)) bWait = 1;
     if (!bWait) iRefreshMode = REFRESH_PARTIAL; // fast update when showing loading screen
+    // PHASE 2: Temperature-aware refresh optimization
+    // Extreme temperatures require more conservative refresh to prevent ghosting
+    temp_band_t temp_band = get_temperature_band();
+    if (temp_band == TEMP_BAND_COLD && iRefreshMode == REFRESH_PARTIAL) {
+        // Cold temperatures increase viscosity, need full refresh more often
+        if ((iUpdateCount & 0x7) == 0) {  // Every 8 partials in cold (vs 16 normal)
+            Log_info("%s [%d]: Cold temp detected, using full refresh for quality\r\n", __FILE__, __LINE__);
+            iRefreshMode = REFRESH_FULL;
+        }
+    } else if (temp_band == TEMP_BAND_HOT && iRefreshMode == REFRESH_PARTIAL) {
+        // Hot temperatures can cause particle drift
+        if ((iUpdateCount & 0x7) == 0) {  // Every 8 partials in hot
+            Log_info("%s [%d]: Hot temp detected, using full refresh for stability\r\n", __FILE__, __LINE__);
+            iRefreshMode = REFRESH_FULL;
+        }
+    }
     Log_info("%s [%d]: EPD refresh mode: %d\r\n", __FILE__, __LINE__, iRefreshMode);
     bbep.setLightSleep(true);
     bbep.refresh(iRefreshMode, bWait);
+    // PHASE 2: Track refresh statistics for optimization analysis
+    extern refresh_stats_t g_refresh_stats;
+    g_refresh_stats.total_refreshes++;
+    if (iRefreshMode == REFRESH_FULL) {
+        g_refresh_stats.full_refreshes++;
+    } else if (iRefreshMode == REFRESH_PARTIAL || iRefreshMode == REFRESH_FAST) {
+        g_refresh_stats.partial_refreshes++;
+    }
     if ((bbep.getPanelType() == EP426_800x480 || bbep.getPanelType() == EP397_800x480) && iRefreshMode == REFRESH_PARTIAL) {
         i426Workaround = 1; // need to re-initialize the controller for another update before sleeping
     }

@@ -1,0 +1,515 @@
+/**
+ * @file sprite_renderer_refactored.cpp
+ * @brief Memory-efficient sprite renderer implementation
+ *
+ * Optimizations:
+ * - Hardware abstraction layer for portability
+ * - Minimal stack usage
+ * - Efficient drawing functions
+ * - Adaptable to different screen sizes
+ */
+
+#include "sprite_renderer_refactored.h"
+#include "sprite_data.h"
+#include "utils.h"
+#include "display.h"
+#include "DEV_Config.h"
+#include <PNGdec.h>
+
+// ============================================================
+// HARDWARE ABSTRACTION
+// ============================================================
+
+// Forward declarations
+#ifdef BB_EPAPER
+extern bb_epaper bbep;
+#endif
+
+// Display capabilities (detected at runtime)
+static display_caps_t s_display_caps = {0};
+
+// ============================================================
+// RENDERER STATE
+// ============================================================
+
+static struct {
+    sprite_render_config_t config;
+    bool initialized;
+    sprite_state_t current_state;
+    unsigned long last_frame_time;
+    uint16_t frame_duration;
+    bool animating;
+} s_renderer = {
+    .config = {
+        .x = 0,
+        .y = 0,
+        .width = 0,
+        .height = 0,
+        .flags = {
+            .auto_center = true,
+            .auto_scale = false,
+            .clear_area = true,
+            .invert = false,
+        }
+    },
+    .initialized = false,
+    .current_state = SPRITE_STATE_UNKNOWN,
+    .frame_duration = SPRITE_DEFAULT_FRAME_DURATION,
+    .animating = false,
+};
+
+// Custom draw function (for alternate displays)
+static sprite_draw_func_t s_custom_draw_func = nullptr;
+
+// ============================================================
+// DISPLAY CAPABILITIES DETECTION
+// ============================================================
+
+static void detect_display_caps(void) {
+#ifdef BB_EPAPER
+    s_display_caps.width = bbep.width();
+    s_display_caps.height = bbep.height();
+    s_display_caps.supports_partial = true;
+    s_display_caps.supports_4gray = true;
+    s_display_caps.needs_refresh = true;
+#else
+    // Default to typical e-ink specs
+    s_display_caps.width = DISPLAY_WIDTH;
+    s_display_caps.height = DISPLAY_HEIGHT;
+    s_display_caps.supports_partial = true;
+    s_display_caps.supports_4gray = false;
+    s_display_caps.needs_refresh = true;
+#endif
+
+    LOG_INFO(LOG_MOD_DISPLAY, "Caps: %dx%d partial=%d gray=%d",
+             s_display_caps.width, s_display_caps.height,
+             s_display_caps.supports_partial,
+             s_display_caps.supports_4gray);
+}
+
+const display_caps_t* sprite_get_display_caps(void) {
+    if (s_display_caps.width == 0) {
+        detect_display_caps();
+    }
+    return &s_display_caps;
+}
+
+// ============================================================
+// POSITIONING HELPERS
+// ============================================================
+
+/**
+ * @brief Calculate sprite position based on config
+ */
+static void calculate_position(uint16_t* x, uint16_t* y,
+                               uint16_t* w, uint16_t* h) {
+    const display_caps_t* caps = sprite_get_display_caps();
+
+    // Use config size or default
+    *w = s_renderer.config.width > 0 ? s_renderer.config.width : SPRITE_DEFAULT_WIDTH;
+    *h = s_renderer.config.height > 0 ? s_renderer.config.height : SPRITE_DEFAULT_HEIGHT;
+
+    // Calculate position
+    if (s_renderer.config.flags.auto_center) {
+        *x = (caps->width - *w) / 2;
+        *y = (caps->height - *h) / 2;
+    } else {
+        *x = s_renderer.config.x;
+        *y = s_renderer.config.y;
+    }
+
+    // Apply manual offset if set
+    if (s_renderer.config.x > 0 && !s_renderer.config.flags.auto_center) {
+        *x = s_renderer.config.x;
+    }
+    if (s_renderer.config.y > 0 && !s_renderer.config.flags.auto_center) {
+        *y = s_renderer.config.y;
+    }
+}
+
+// ============================================================
+// PNG DRAWING CALLBACK
+// ============================================================
+
+/**
+ * @brief Optimized PNG draw callback
+ */
+static int png_draw_callback(PNGDRAW* pDraw) {
+#ifdef BB_EPAPER
+    int x;
+    uint8_t uc = 0, ucMask, src, *s, *d;
+    int iPlane = *(int*)pDraw->pUser;
+
+    uint16_t draw_x, draw_y, draw_w, draw_h;
+    calculate_position(&draw_x, &draw_y, &draw_w, &draw_h);
+
+    // Set window for this line
+    bbep.setXY(draw_x, draw_y + pDraw->y, draw_x + draw_w - 1, draw_y + pDraw->y);
+
+    if (iPlane == PNG_1_BIT || iPlane == PNG_1_BIT_INVERTED) {
+        uint8_t ucInvert = (iPlane == PNG_1_BIT_INVERTED);
+        s = pDraw->pPixels;
+        d = (uint8_t*)bbep.getCache();
+        ucMask = 0x80;
+
+        // Process 8 pixels per loop iteration
+        for (x = 0; x < (int)pDraw->iWidth; x++) {
+            if (ucMask == 0) {
+                ucMask = 0x80;
+                s++;
+            }
+            src = (*s & ucMask) ? 1 : 0;
+            if (ucInvert) src ^= 1;
+            if (s_renderer.config.flags.invert) src ^= 1;
+
+            uc <<= 1;
+            uc |= src;
+            ucMask >>= 1;
+
+            if ((x & 7) == 7) {
+                *d++ = uc;
+                uc = 0;
+            }
+        }
+
+        // Handle remaining pixels
+        if ((x & 7) != 0) {
+            uc <<= (7 - (x & 7));
+            *d++ = uc;
+        }
+
+        bbep.writeData(d - (uint8_t*)bbep.getCache());
+    }
+#endif
+    return 1;
+}
+
+/**
+ * @brief Draw PNG data to display
+ */
+static bool draw_png_data(const uint8_t* data, size_t size) {
+    if (!data || size == 0) {
+        return false;
+    }
+
+#ifdef BB_EPAPER
+    // Use stack allocation for PNG decoder (avoid heap fragmentation)
+    PNG png;
+    int rc = png.openRAM((uint8_t*)data, size, png_draw_callback);
+
+    if (rc != PNG_SUCCESS) {
+        LOG_WARN(LOG_MOD_SPRITE, "PNG open failed: %d", rc);
+        return false;
+    }
+
+    // Decode as 1-bit
+    int iPlane = PNG_1_BIT;
+    bbep.startWrite(PLANE_0);
+    rc = png.decode(&iPlane, 0);
+    png.close();
+
+    if (rc != PNG_SUCCESS) {
+        LOG_WARN(LOG_MOD_SPRITE, "PNG decode failed: %d", rc);
+        return false;
+    }
+
+    // Refresh the display
+    bbep.refresh(REFRESH_FAST, false);
+#endif
+    return true;
+}
+
+// ============================================================
+// PROCEDURAL SPRITE DRAWING (OPTIMIZED)
+// ============================================================
+
+/**
+ * @brief Procedural sprite elements (reusable components)
+ */
+namespace sprite_elements {
+#ifdef BB_EPAPER
+    // Face outline
+    inline void face(uint16_t cx, uint16_t cy, uint8_t radius, uint8_t color = 1) {
+        bbep.fillCircle(cx, cy, radius, color);
+    }
+
+    // Eye types
+    inline void eye_closed(uint16_t x, uint16_t y) {
+        bbep.fillCircle(x, y, 5, 1);
+    }
+
+    inline void eye_open(uint16_t x, uint16_t y, uint8_t size = 8) {
+        bbep.fillCircle(x, y, size, 1);
+    }
+
+    inline void eye_wide(uint16_t x, uint16_t y) {
+        bbep.fillCircle(x, y, 12, 0);  // White
+        bbep.fillCircle(x, y, 8, 1);   // Pupil
+    }
+
+    inline void eye_x(uint16_t cx, uint16_t cy) {
+        bbep.drawLine(cx - 5, cy - 5, cx + 5, cy + 5, 1);
+        bbep.drawLine(cx + 5, cy - 5, cx - 5, cy + 5, 1);
+    }
+
+    // Mouth types
+    inline void mouth_happy(uint16_t x, uint16_t y) {
+        bbep.fillCircle(x, y, 10, 0);
+        bbep.fillCircle(x, y - 2, 8, 1);
+    }
+
+    inline void mouth_flat(uint16_t x, uint16_t y, uint8_t w = 10) {
+        bbep.fillRect(x - w/2, y, w, 3, 1);
+    }
+
+    inline void mouth_open(uint16_t x, uint16_t y) {
+        bbep.fillCircle(x, y, 12, 0);
+        bbep.fillCircle(x, y, 8, 1);
+    }
+
+    inline void mouth_sad(uint16_t x, uint16_t y) {
+        bbep.drawArc(x, y + 5, 15, 10, 180, 0, 1);
+    }
+
+    // Decorations
+    inline void thought_bubble(uint16_t x, uint16_t y, uint8_t size) {
+        bbep.fillCircle(x, y, size, 1);
+    }
+
+    inline void speech_wave(uint16_t x, uint16_t y, uint8_t i) {
+        uint8_t w = 5 + i * 2;
+        uint8_t h = 5 + i * 2;
+        bbep.fillRect(x, y - h/2, w, h, 1);
+    }
+
+    inline void z_mark(uint16_t x, uint16_t y) {
+        bbep.drawChar(x, y, 'Z', 1, 0);
+    }
+
+    inline void alert_mark(uint16_t x, uint16_t y) {
+        bbep.drawLine(x - 5, y - 5, x, y - 10, 1);
+        bbep.drawLine(x + 5, y - 5, x, y - 10, 1);
+        bbep.drawLine(x, y - 10, x, y, 1);
+    }
+
+    inline void sweat_drop(uint16_t x, uint16_t y) {
+        bbep.fillCircle(x, y, 8, 1);
+    }
+
+    inline void sparkle(uint16_t x, uint16_t y) {
+        bbep.drawLine(x - 5, y, x + 5, y, 1);
+        bbep.drawLine(x, y - 5, x, y + 5, 1);
+    }
+
+    // Gear icon
+    inline void gear(uint16_t x, uint16_t y, uint8_t size) {
+        bbep.fillCircle(x, y, size, 1);
+        bbep.fillCircle(x, y, size/2, 0);
+        for (int i = 0; i < 8; i++) {
+            float angle = i * 45 * 0.01745;
+            bbep.fillCircle(x + cos(angle) * (size + 3),
+                           y + sin(angle) * (size + 3), 3, 1);
+        }
+    }
+#endif  // BB_EPAPER
+}  // namespace sprite_elements
+
+/**
+ * @brief Draw procedural sprite (optimized with reusable elements)
+ */
+static bool draw_procedural(sprite_state_t state) {
+#ifdef BB_EPAPER
+    using namespace sprite_elements;
+
+    uint16_t x, y, w, h;
+    calculate_position(&x, &y, &w, &h);
+
+    uint16_t cx = x + w / 2;
+    uint16_t cy = y + h / 2;
+
+    // Clear area first
+    if (s_renderer.config.flags.clear_area) {
+        bbep.fillRect(x, y, w, h, 0);
+    }
+
+    // Draw common face
+    face(cx, cy, 40);
+
+    // State-specific elements
+    switch (state) {
+        case SPRITE_STATE_IDLE:
+            eye_closed(cx - 15, cy - 10);
+            eye_closed(cx + 15, cy - 10);
+            bbep.fillCircle(cx, cy + 15, 10, 0);  // Empty mouth
+            break;
+
+        case SPRITE_STATE_THINKING:
+            eye_open(cx - 15, cy - 10);
+            eye_open(cx + 15, cy - 10);
+            mouth_flat(cx, cy + 10);
+            thought_bubble(cx + 50, cy - 50, 8);
+            thought_bubble(cx + 65, cy - 65, 12);
+            thought_bubble(cx + 85, cy - 85, 18);
+            break;
+
+        case SPRITE_STATE_TALKING:
+            eye_open(cx - 15, cy - 10);
+            eye_open(cx + 15, cy - 10);
+            mouth_open(cx, cy + 15);
+            for (int i = 0; i < 3; i++) {
+                speech_wave(cx + 45 + i * 15, cy, i);
+            }
+            break;
+
+        case SPRITE_STATE_EXCITED:
+            for (int i = 0; i < 8; i++) {
+                sparkle(cx - 50 + (i % 4) * 30,
+                       cy - 50 + (i / 4) * 30);
+            }
+            mouth_happy(cx, cy + 10);
+            break;
+
+        case SPRITE_STATE_SLEEPING:
+            eye_closed(cx - 15, cy - 10);
+            eye_closed(cx + 15, cy - 10);
+            mouth_flat(cx, cy + 10);
+            z_mark(cx + 50, cy - 40);
+            z_mark(cx + 65, cy - 55);
+            z_mark(cx + 80, cy - 70);
+            break;
+
+        case SPRITE_STATE_ERROR:
+            eye_x(cx - 15, cy - 10);
+            eye_x(cx + 15, cy - 10);
+            mouth_sad(cx, cy + 10);
+            sweat_drop(cx + 45, cy - 20);
+            break;
+
+        case SPRITE_STATE_ALERT:
+            eye_wide(cx - 15, cy - 10);
+            eye_wide(cx + 15, cy - 10);
+            mouth_flat(cx, cy + 10);
+            alert_mark(cx - 50, cy - 40);
+            alert_mark(cx + 50, cy - 40);
+            break;
+
+        case SPRITE_STATE_WORKING:
+            eye_open(cx - 15, cy - 10, 5);
+            eye_open(cx + 15, cy - 10, 5);
+            mouth_flat(cx, cy + 10, 8);
+            gear(cx + 60, cy - 20, 15);
+            break;
+
+        default:
+            return false;
+    }
+
+    // Trigger refresh
+    bbep.refresh(REFRESH_FAST, false);
+    return true;
+#else
+    return false;
+#endif
+}
+
+// ============================================================
+// PUBLIC API
+// ============================================================
+
+bool sprite_renderer_init(void) {
+    if (s_renderer.initialized) {
+        return true;
+    }
+
+    detect_display_caps();
+
+    // Apply defaults to config
+    if (s_renderer.config.flags.auto_center) {
+        calculate_position(&s_renderer.config.x, &s_renderer.config.y,
+                          &s_renderer.config.width, &s_renderer.config.height);
+    }
+
+    s_renderer.initialized = true;
+    LOG_INFO(LOG_MOD_SPRITE, "Init: %dx%d @ (%d,%d)",
+             s_renderer.config.width, s_renderer.config.height,
+             s_renderer.config.x, s_renderer.config.y);
+
+    return true;
+}
+
+void sprite_set_render_config(const sprite_render_config_t* config) {
+    if (config) {
+        s_renderer.config = *config;
+    }
+}
+
+void sprite_get_render_config(sprite_render_config_t* config) {
+    if (config) {
+        *config = s_renderer.config;
+    }
+}
+
+bool sprite_display(sprite_state_t state) {
+    if (!s_renderer.initialized) {
+        return false;
+    }
+
+    // Skip if same state (optional optimization)
+    // if (state == s_renderer.current_state) return true;
+
+    s_renderer.current_state = state;
+
+    // Try embedded PNG first
+    const sprite_data_t* data = get_sprite_data(state);
+    if (data && data->data) {
+        return draw_png_data(data->data, data->size);
+    }
+
+    // Fallback to procedural
+    return draw_procedural(state);
+}
+
+bool sprite_display_at(sprite_state_t state, uint16_t x, uint16_t y) {
+    sprite_render_config_t orig = s_renderer.config;
+    s_renderer.config.x = x;
+    s_renderer.config.y = y;
+    s_renderer.config.flags.auto_center = false;
+    bool result = sprite_display(state);
+    s_renderer.config = orig;
+    return result;
+}
+
+void sprite_clear(void) {
+#ifdef BB_EPAPER
+    uint16_t x, y, w, h;
+    calculate_position(&x, &y, &w, &h);
+    bbep.fillRect(x, y, w, h, 0);
+    bbep.refresh(REFRESH_FAST, false);
+#endif
+}
+
+bool sprite_is_ready(void) {
+    return s_renderer.initialized;
+}
+
+// ============================================================
+// ANIMATION
+// ============================================================
+
+bool sprite_animate(void) {
+    // TODO: Multi-frame animation support
+    // For now, sprites are static
+    return false;
+}
+
+void sprite_set_animation_speed(uint16_t duration_ms) {
+    s_renderer.frame_duration = duration_ms;
+}
+
+void sprite_set_animation_enabled(bool enabled) {
+    s_renderer.animating = enabled;
+}
+
+void sprite_register_draw_func(sprite_draw_func_t func) {
+    s_custom_draw_func = func;
+}

@@ -49,6 +49,8 @@ int iSensorType = -1;
 long lSampleTime;
 RTC_DATA_ATTR int lastCO2 = 0, lastSCDTemp = 0, lastTemp = 0, lastSCDHumid = 0, lastHumid = 0, lastPressure = 0, lastType = -1, lastTime = 0;
 #endif // SENSOR_SDA
+#include <mdns_discovery.h>
+
 bool pref_clear = false;
 String new_filename = "";
 ApiDisplayResult apiDisplayResult;
@@ -213,6 +215,10 @@ void bl_init(void)
       double_click = true;
       break;
     case ShortPress:
+      // Shadow Lab: short press = force immediate refresh
+      Log_info("Short press -> force refresh");
+      need_to_refresh_display = 1;
+      break;
     case NoAction:
       break;
     case SoftReset:
@@ -479,7 +485,7 @@ void bl_init(void)
     default:
       Log.info("%s [%d]: Max retries done. Time to sleep: %d\r\n", __FILE__, __LINE__, SLEEP_TIME_TO_SLEEP);
       preferences.putUInt(PREFERENCES_SLEEP_TIME_KEY, SLEEP_TIME_TO_SLEEP);
-      preferences.putInt(PREFERENCES_CONNECT_API_RETRY_COUNT, ++retries);
+      preferences.putInt(PREFERENCES_CONNECT_API_RETRY_COUNT, 1); // Reset counter to avoid unbounded growth
       break;
     }
   }
@@ -679,11 +685,13 @@ static https_request_err_e downloadAndShow()
     apiHostname = apiHostname.substring(0, colon);
   }
 
+  bool dnsResolved = false;
   for (int attempt = 1; attempt <= 5; ++attempt)
   {
     if (WiFi.hostByName(apiHostname.c_str(), serverIP) == 1)
     {
       Log.info("%s [%d]: Hostname resolved to %s on attempt %d\r\n", __FILE__, __LINE__, serverIP.toString().c_str(), attempt);
+      dnsResolved = true;
       break;
     }
     else
@@ -691,6 +699,11 @@ static https_request_err_e downloadAndShow()
       Log_error("Failed to resolve hostname on attempt %d", attempt);
       delay(2000);
     }
+  }
+  if (!dnsResolved)
+  {
+    Log_error_submit("DNS resolution failed after 5 attempts for %s", apiHostname.c_str());
+    return HTTPS_UNABLE_TO_CONNECT;
   }
 
   auto apiDisplayInputs = loadApiDisplayInputs(preferences);
@@ -1081,8 +1094,17 @@ https_request_err_e handleApiDisplayResponse(ApiDisplayResponse &apiResponse)
     case 0:
     {
       String image_url = apiResponse.image_url;
+#ifdef SHADOW_OTA_ENABLED
+      // Shadow Lab: check our own firmware server regardless of TRMNL BYOD restriction
+      String firmware_url = apiResponse.firmware_url;
+      if (firmware_url.length() == 0) {
+        firmware_url = SHADOW_OTA_URL;
+      }
+      update_firmware = apiResponse.update_firmware || (firmware_url.length() > 0);
+#else
       update_firmware = apiResponse.update_firmware;
       String firmware_url = apiResponse.firmware_url;
+#endif
       uint64_t rate = apiResponse.refresh_rate;
       reset_firmware = apiResponse.reset_firmware;
 
@@ -1104,7 +1126,7 @@ https_request_err_e handleApiDisplayResponse(ApiDisplayResponse &apiResponse)
         Log.info("%s [%d]: image_url: %s\r\n", __FILE__, __LINE__, image_url.c_str());
         Log.info("%s [%d]: image url end with: %d\r\n", __FILE__, __LINE__, image_url.endsWith("/setup-logo.bmp"));
 
-        image_url.toCharArray(filename, image_url.length() + 1);
+        image_url.toCharArray(filename, min((int)image_url.length() + 1, (int)sizeof(filename)));
         // check if plugin is applied
         bool flag = preferences.getBool(PREFERENCES_DEVICE_REGISTERED_KEY, false);
         Log.info("%s [%d]: flag: %d\r\n", __FILE__, __LINE__, flag);
@@ -1170,7 +1192,7 @@ https_request_err_e handleApiDisplayResponse(ApiDisplayResponse &apiResponse)
       if (firmware_url.length() > 0)
       {
         Log.info("%s [%d]: firmware_url: %s\r\n", __FILE__, __LINE__, firmware_url.c_str());
-        firmware_url.toCharArray(binUrl, firmware_url.length() + 1);
+        firmware_url.toCharArray(binUrl, min((int)firmware_url.length() + 1, (int)sizeof(binUrl)));
       }
       Log.info("%s [%d]: refresh_rate: %d\r\n", __FILE__, __LINE__, rate);
       if (rate != preferences.getUInt(PREFERENCES_SLEEP_TIME_KEY, SLEEP_TIME_TO_SLEEP))
@@ -1239,7 +1261,7 @@ https_request_err_e handleApiDisplayResponse(ApiDisplayResponse &apiResponse)
             Log.info("%s [%d]: image_url: %s\r\n", __FILE__, __LINE__, image_url.c_str());
             Log.info("%s [%d]: image url end with: %d\r\n", __FILE__, __LINE__, image_url.endsWith("/setup-logo.bmp"));
 
-            image_url.toCharArray(filename, image_url.length() + 1);
+            image_url.toCharArray(filename, min((int)image_url.length() + 1, (int)sizeof(filename)));
             // check if plugin is applied
             bool flag = preferences.getBool(PREFERENCES_DEVICE_REGISTERED_KEY, false);
             Log.info("%s [%d]: flag: %d\r\n", __FILE__, __LINE__, flag);
@@ -1341,7 +1363,7 @@ https_request_err_e handleApiDisplayResponse(ApiDisplayResponse &apiResponse)
             Log.info("%s [%d]: image_url: %s\r\n", __FILE__, __LINE__, image_url.c_str());
             Log.info("%s [%d]: image url end with: %d\r\n", __FILE__, __LINE__, image_url.endsWith("/setup-logo.bmp"));
 
-            image_url.toCharArray(filename, image_url.length() + 1);
+            image_url.toCharArray(filename, min((int)image_url.length() + 1, (int)sizeof(filename)));
             // check if plugin is applied
             bool flag = preferences.getBool(PREFERENCES_DEVICE_REGISTERED_KEY, false);
             Log.info("%s [%d]: flag: %d\r\n", __FILE__, __LINE__, flag);
@@ -1491,6 +1513,11 @@ https_request_err_e handleApiDisplayResponse(ApiDisplayResponse &apiResponse)
           {
             Log.info("%s [%d]: send_to_me BMP\r\n", __FILE__, __LINE__);
             buffer = (uint8_t *)malloc(DISPLAY_BMP_IMAGE_SIZE);
+            if (buffer == NULL)
+            {
+              Log_error_submit("Failed to allocate buffer for send_to_me BMP");
+              return HTTPS_WRONG_IMAGE_FORMAT;
+            }
 
             if (!filesystem_read_from_file("/current.bmp", buffer, DISPLAY_BMP_IMAGE_SIZE))
             {
@@ -1500,6 +1527,7 @@ https_request_err_e handleApiDisplayResponse(ApiDisplayResponse &apiResponse)
               return HTTPS_WRONG_IMAGE_FORMAT;
             }
 
+            file_size = DISPLAY_BMP_IMAGE_SIZE; // Set file_size for display_show_image below
             bmp_err_e bmp_parse_result = parseBMPHeader(buffer, image_reverse);
             if (bmp_parse_result != BMP_NO_ERR)
             {
@@ -1554,7 +1582,7 @@ https_request_err_e handleApiDisplayResponse(ApiDisplayResponse &apiResponse)
             Log.info("%s [%d]: image_url: %s\r\n", __FILE__, __LINE__, image_url.c_str());
             Log.info("%s [%d]: image url end with: %d\r\n", __FILE__, __LINE__, image_url.endsWith("/setup-logo.bmp"));
 
-            image_url.toCharArray(filename, image_url.length() + 1);
+            image_url.toCharArray(filename, min((int)image_url.length() + 1, (int)sizeof(filename)));
             // check if plugin is applied
             bool flag = preferences.getBool(PREFERENCES_DEVICE_REGISTERED_KEY, false);
             Log.info("%s [%d]: flag: %d\r\n", __FILE__, __LINE__, flag);
@@ -1694,6 +1722,39 @@ static bool performApiSetup()
 
   Log.info("%s [%d]: GET... code: %d\r\n", __FILE__, __LINE__, url_status);
 
+  // ============================================================
+  // INTERNAL MAC WHITELIST for Xteink X4 devices
+  // Bypasses server-side MAC check for known local devices
+  // ============================================================
+  const char* WHITELISTED_MACS[] = {
+    "88:56:A6:F0:50:94",  // Xteink X4
+    // Add more MAC addresses here as needed
+  };
+
+  String currentMac = WiFi.macAddress();
+  bool is_whitelisted = false;
+
+  for (size_t i = 0; i < sizeof(WHITELISTED_MACS) / sizeof(WHITELISTED_MACS[0]); i++) {
+    if (currentMac.equalsIgnoreCase(WHITELISTED_MACS[i])) {
+      is_whitelisted = true;
+      Log_info("[WHITELIST] Device MAC %s found in internal whitelist", currentMac.c_str());
+      break;
+    }
+  }
+
+  // If whitelisted device gets 404, treat as success (local mode)
+  if (is_whitelisted && url_status == 404) {
+    Log_info("[WHITELIST] Bypassing server 404 - enabling local mode");
+    url_status = 200;
+
+    // Set default values for local operation
+    apiResponse.api_key = "";
+    apiResponse.friendly_id = "Xteink-X4-" + currentMac.substring(9);
+    apiResponse.image_url = "";
+    apiResponse.message = "Local mode - use mDNS server";
+  }
+  // ============================================================
+
   if (url_status == 200)
   {
     status = true;
@@ -1711,11 +1772,11 @@ static bool performApiSetup()
 
     String image_url = apiResponse.image_url;
     Log.info("%s [%d]: image_url - %s\r\n", __FILE__, __LINE__, image_url.c_str());
-    image_url.toCharArray(filename, image_url.length() + 1);
+    image_url.toCharArray(filename, min((int)image_url.length() + 1, (int)sizeof(filename)));
 
     String message_str = apiResponse.message;
     Log.info("%s [%d]: message - %s\r\n", __FILE__, __LINE__, message_str.c_str());
-    message_str.toCharArray(message_buffer, message_str.length() + 1);
+    message_str.toCharArray(message_buffer, min((int)message_str.length() + 1, (int)sizeof(message_buffer)));
 
     Log.info("%s [%d]: status - %d\r\n", __FILE__, __LINE__, status);
     return true;
@@ -1821,8 +1882,19 @@ static void downloadSetupImage()
 
     uint32_t counter = 0;
     // Read and save BMP data to buffer
-    buffer = (uint8_t *)malloc(https->getSize());
-    if (stream->available() && https->getSize() == DISPLAY_BMP_IMAGE_SIZE)
+    int setupImageSize = https->getSize();
+    if (setupImageSize <= 0 || setupImageSize > DISPLAY_BMP_IMAGE_SIZE)
+    {
+      Log_error_submit("Invalid setup image size: %d", setupImageSize);
+      return false;
+    }
+    buffer = (uint8_t *)malloc(setupImageSize);
+    if (buffer == NULL)
+    {
+      Log_error_submit("Failed to allocate %d bytes for setup image", setupImageSize);
+      return false;
+    }
+    if (stream->available() && setupImageSize == DISPLAY_BMP_IMAGE_SIZE)
     {
       counter = downloadStream(stream, DISPLAY_BMP_IMAGE_SIZE, buffer);
     }
@@ -1867,7 +1939,35 @@ static void getDeviceCredentials()
   Log.info("%s [%d]: status - %d\r\n", __FILE__, __LINE__, status);
   if (shouldDownloadImage)
   {
-    downloadSetupImage();
+    // Check if running in local mode (empty filename = no cloud image)
+    if (filename[0] == '\0')
+    {
+      Log_info("[LOCAL] Local mode activated - scanning for TRMNL servers");
+
+      // Try to discover local TRMNL server via mDNS
+      char local_server_url[128];
+      if (mdns_get_local_server_url(local_server_url, sizeof(local_server_url)))
+      {
+        Log_info("[LOCAL] Found local server: %s", local_server_url);
+
+        // Cache local server URL for future use
+        preferences.begin(PREFERENCES_NAMESPACE, false);
+        preferences.putString(PREFERENCES_LOCAL_SERVER_URL, local_server_url);
+        preferences.end();
+      }
+      else
+      {
+        Log_info("[LOCAL] No local TRMNL server found - will scan in background");
+      }
+
+      // Continue to sleep - next refresh cycle will try local server
+      goToSleep();
+    }
+    else
+    {
+      // Cloud mode - download image from server
+      downloadSetupImage();
+    }
   }
 }
 
@@ -1912,6 +2012,7 @@ static void checkAndPerformFirmwareUpdate(void)
                {
                  showMessageWithLogo(WIFI_WEAK);
                }
+               return true; // Early return — don't dereference null https pointer
              }
 
              int httpCode = https->GET();
@@ -1932,6 +2033,8 @@ static void checkAndPerformFirmwareUpdate(void)
                    {
                      Log.info("%s [%d]: Firmware update successful. Rebooting...\r\n", __FILE__, __LINE__);
                      showMessageWithLogo(FW_UPDATE_SUCCESS);
+                     delay(2000); // Let user see success message on e-paper
+                     ESP.restart();
                    }
                    else
                    {

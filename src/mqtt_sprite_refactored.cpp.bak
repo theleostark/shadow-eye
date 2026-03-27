@@ -1,0 +1,392 @@
+/**
+ * @file mqtt_sprite_refactored.cpp
+ * @brief Memory-efficient MQTT sprite implementation
+ *
+ * Optimizations for low-end devices:
+ * - Stack buffers sized appropriately
+ * - Minimal heap usage
+ * - Efficient string operations
+ * - Scoped preferences
+ */
+
+#include "mqtt_sprite_refactored.h"
+#include <WiFi.h>
+#include <PubSubClient.h>
+#include "ArduinoJson.h"
+#include "utils.h"
+
+// ============================================================
+// CONSTANTS IN PROGMEM (save RAM)
+// ============================================================
+
+static const char TAG[] PROGMEM = LOG_MOD_MQTT;
+static const char ERR_JSON[] PROGMEM = "JSON error";
+static const char ERR_MEM[] PROGMEM = "Out of memory";
+static const char ERR_BUFFER[] PROGMEM = "Buffer overflow";
+
+// ============================================================
+// GLOBAL STATE (minimized)
+// ============================================================
+
+// Single WiFi client instance
+static WiFiClient s_wifi_client;
+
+// MQTT client (uses existing WiFi client)
+static PubSubClient s_mqtt_client(s_wifi_client);
+
+// Runtime configuration
+static sprite_config_t s_config;
+
+// Connection state tracking
+static mqtt_client_state_t s_connection_state = MQTT_STATE_DISCONNECTED;
+static unsigned long s_last_connect_attempt = 0;
+static char s_error_buf[32] = {0};
+
+// Message queue (single message for efficiency)
+static sprite_message_compact_t s_latest_message = {0};
+static bool s_message_ready = false;
+
+// External preferences reference
+extern Preferences preferences;
+
+// ============================================================
+// HELPER FUNCTIONS
+// ============================================================
+
+/**
+ * @brief Set error message (stores in buffer)
+ */
+static void set_error(const char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(s_error_buf, sizeof(s_error_buf), fmt, args);
+    va_end(args);
+    LOG_ERROR(TAG, "%s", s_error_buf);
+}
+
+/**
+ * @brief Clear error
+ */
+static inline void clear_error(void) {
+    s_error_buf[0] = '\0';
+}
+
+/**
+ * @brief Convert compact flags to full message struct (for compatibility)
+ */
+static inline void compact_to_full(const sprite_message_compact_t* src,
+                                   sprite_message_t* dst) {
+    if (!src || !dst) return;
+    memset(dst, 0, sizeof(sprite_message_t));
+    dst->state = src->state;
+    dst->has_message = (src->flags & MSG_FLAG_HAS_MESSAGE) != 0;
+    dst->has_state = (src->flags & MSG_FLAG_HAS_STATE) != 0;
+    if (dst->has_message) {
+        safe_strcpy(dst->message, src->message, sizeof(dst->message));
+    }
+}
+
+/**
+ * @brief MQTT message callback
+ */
+static void mqtt_callback(char* topic, byte* payload, unsigned int length) {
+    // Stack-allocated buffer for JSON (avoid heap)
+    char json_buf[256];
+
+    // Truncate if too large
+    if (length >= sizeof(json_buf)) {
+        length = sizeof(json_buf) - 1;
+        LOG_WARN(TAG, "Message truncated");
+    }
+
+    memcpy(json_buf, payload, length);
+    json_buf[length] = '\0';
+
+    LOG_INFO(TAG, "Rx: %s", json_buf);
+
+    // Parse JSON using stack-allocated document
+    JsonDocument doc;  // ArduinoJson v7+ uses stack by default
+    DeserializationError error = deserializeJson(doc, json_buf);
+
+    if (error) {
+        set_error("JSON: %s", error.c_str());
+        return;
+    }
+
+    // Extract state
+    sprite_message_compact_t msg = {0};
+    msg.flags = 0;
+
+    // Parse state field
+    if (doc["state"].is<const char*>()) {
+        const char* state_str = doc["state"];
+        msg.state = sprite_state_from_string(state_str);
+        msg.flags |= MSG_FLAG_HAS_STATE;
+    }
+
+    // Parse message field
+    if (doc["message"].is<const char*>()) {
+        const char* message_str = doc["message"];
+        safe_strcpy(msg.message, message_str, sizeof(msg.message));
+        msg.flags |= MSG_FLAG_HAS_MESSAGE;
+    }
+
+    // Store message if valid
+    if (msg.flags != 0) {
+        s_latest_message = msg;
+        s_message_ready = true;
+        LOG_INFO(TAG, "Parsed: state=%d", msg.state);
+    }
+}
+
+/**
+ * @brief Attempt MQTT connection
+ * @return true if connected
+ */
+static bool attempt_connect(void) {
+    if (!s_config.mqtt.enabled) {
+        return false;
+    }
+
+    if (s_mqtt_client.connected()) {
+        s_connection_state = MQTT_STATE_CONNECTED;
+        return true;
+    }
+
+    // Rate limiting
+    unsigned long now = millis();
+    if (now - s_last_connect_attempt < s_config.mqtt.reconnect_interval) {
+        return false;
+    }
+    s_last_connect_attempt = now;
+
+    s_connection_state = MQTT_STATE_CONNECTING;
+    LOG_INFO(TAG, "Connecting to %s:%d", s_config.mqtt.broker, s_config.mqtt.port);
+
+    // Configure client
+    s_mqtt_client.setServer(s_config.mqtt.broker, s_config.mqtt.port);
+    s_mqtt_client.setCallback(mqtt_callback);
+
+    // Attempt connection
+    bool connected = false;
+    if (s_config.mqtt.username[0] != '\0') {
+        connected = s_mqtt_client.connect(SPRITE_DEFAULT_CLIENT_ID,
+                                        s_config.mqtt.username,
+                                        s_config.mqtt.password);
+    } else {
+        connected = s_mqtt_client.connect(SPRITE_DEFAULT_CLIENT_ID);
+    }
+
+    if (connected) {
+        s_connection_state = MQTT_STATE_CONNECTED;
+        clear_error();
+
+        // Subscribe to topic
+        if (s_mqtt_client.subscribe(s_config.mqtt.topic)) {
+            LOG_INFO(TAG, "Subscribed: %s", s_config.mqtt.topic);
+        } else {
+            LOG_WARN(TAG, "Subscribe failed");
+        }
+    } else {
+        s_connection_state = MQTT_STATE_ERROR;
+        set_error("Conn: %d", s_mqtt_client.state());
+    }
+
+    return connected;
+}
+
+// ============================================================
+// PUBLIC API IMPLEMENTATION
+// ============================================================
+
+bool mqtt_sprite_init(const sprite_config_t* config) {
+    // Load or use defaults
+    if (config) {
+        s_config = *config;
+    } else {
+        sprite_config_init_defaults(&s_config);
+        mqtt_sprite_load_config(&s_config);  // Override with saved values
+    }
+
+    if (!s_config.mqtt.enabled) {
+        LOG_INFO(TAG, "Disabled");
+        return false;
+    }
+
+    LOG_INFO(TAG, "Init: %s:%d topic=%s",
+             s_config.mqtt.broker,
+             s_config.mqtt.port,
+             s_config.mqtt.topic);
+
+    s_connection_state = MQTT_STATE_DISCONNECTED;
+    return true;
+}
+
+bool mqtt_sprite_loop(void) {
+    if (!s_config.mqtt.enabled) {
+        return false;
+    }
+
+    // Maintain connection
+    if (!s_mqtt_client.connected()) {
+        attempt_connect();
+    }
+
+    // Process incoming messages
+    s_mqtt_client.loop();
+
+    // Return and consume message flag
+    bool had_message = s_message_ready;
+    s_message_ready = false;
+    return had_message;
+}
+
+bool mqtt_sprite_get_message(sprite_message_compact_t* msg) {
+    if (!msg) return false;
+
+    // Check if we have a new message (loop may have cleared flag)
+    // We use a separate flag to avoid race conditions
+    static bool local_ready = false;
+    if (!local_ready) {
+        if (s_message_ready || memcmp(&s_latest_message, msg, sizeof(*msg)) != 0) {
+            local_ready = true;
+        }
+    }
+
+    if (local_ready) {
+        *msg = s_latest_message;
+        local_ready = false;
+        return true;
+    }
+
+    return false;
+}
+
+bool mqtt_sprite_publish_state(sprite_state_t state, const char* message) {
+    if (!s_mqtt_client.connected()) {
+        return false;
+    }
+
+    // Small stack buffer for JSON
+    char json_buf[128];
+
+    // Build JSON
+    int len = snprintf(json_buf, sizeof(json_buf),
+                     "{\"state\":\"%s\"", sprite_state_name(state));
+
+    if (message && *message) {
+        len += snprintf(json_buf + len, sizeof(json_buf) - len,
+                      ",\"message\":\"%.32s\"", message);
+    }
+
+    snprintf(json_buf + len, sizeof(json_buf) - len, "}");
+
+    // Publish
+    return s_mqtt_client.publish(s_config.mqtt.topic, json_buf);
+}
+
+// ============================================================
+// CONFIGURATION
+// ============================================================
+
+bool mqtt_sprite_load_config(sprite_config_t* config) {
+    if (!config) return false;
+
+    ScopedPreferences prefs(preferences, SPRITE_PREF_NAMESPACE, true);
+    if (!prefs) return false;
+
+    // Load values
+    config->mqtt.enabled = prefs.getBool(SPRITE_KEY_ENABLED, SPRITE_DEFAULT_ENABLED);
+
+    prefs.getString(SPRITE_KEY_BROKER, config->mqtt.broker, sizeof(config->mqtt.broker) - 1);
+    if (strlen(config->mqtt.broker) == 0) {
+        safe_strcpy(config->mqtt.broker, SPRITE_DEFAULT_BROKER, sizeof(config->mqtt.broker));
+    }
+
+    config->mqtt.port = prefs.getUInt(SPRITE_KEY_PORT, SPRITE_DEFAULT_PORT);
+
+    prefs.getString(SPRITE_KEY_TOPIC, config->mqtt.topic, sizeof(config->mqtt.topic) - 1);
+    if (strlen(config->mqtt.topic) == 0) {
+        safe_strcpy(config->mqtt.topic, SPRITE_DEFAULT_TOPIC, sizeof(config->mqtt.topic));
+    }
+
+    prefs.getString(SPRITE_KEY_USER, config->mqtt.username, sizeof(config->mqtt.username) - 1);
+    prefs.getString(SPRITE_KEY_PASS, config->mqtt.password, sizeof(config->mqtt.password) - 1);
+
+    return true;
+}
+
+bool mqtt_sprite_save_config(const sprite_config_t* config) {
+    if (!config) return false;
+
+    ScopedPreferences prefs(preferences, SPRITE_PREF_NAMESPACE, false);
+    if (!prefs) return false;
+
+    prefs.putBool(SPRITE_KEY_ENABLED, config->mqtt.enabled);
+    prefs.putString(SPRITE_KEY_BROKER, config->mqtt.broker);
+    prefs.putUInt(SPRITE_KEY_PORT, config->mqtt.port);
+    prefs.putString(SPRITE_KEY_TOPIC, config->mqtt.topic);
+    prefs.putString(SPRITE_KEY_USER, config->mqtt.username);
+    prefs.putString(SPRITE_KEY_PASS, config->mqtt.password);
+
+    // Update runtime config
+    s_config = *config;
+
+    return true;
+}
+
+void mqtt_sprite_set_enabled(bool enabled) {
+    s_config.mqtt.enabled = enabled;
+
+    ScopedPreferences prefs(preferences, SPRITE_PREF_NAMESPACE, false);
+    if (prefs) {
+        prefs.putBool(SPRITE_KEY_ENABLED, enabled);
+    }
+
+    if (enabled) {
+        LOG_INFO(TAG, "Enabled");
+    } else {
+        mqtt_sprite_stop();
+        LOG_INFO(TAG, "Disabled");
+    }
+}
+
+bool mqtt_sprite_is_enabled(void) {
+    return s_config.mqtt.enabled;
+}
+
+// ============================================================
+// CONNECTION INFO
+// ============================================================
+
+bool mqtt_sprite_is_connected(void) {
+    return s_mqtt_client.connected();
+}
+
+const char* mqtt_sprite_get_error(void) {
+    return s_error_buf[0] != '\0' ? s_error_buf : nullptr;
+}
+
+void mqtt_sprite_reconnect(void) {
+    s_last_connect_attempt = 0;
+    s_connection_state = MQTT_STATE_DISCONNECTED;
+}
+
+void mqtt_sprite_stop(void) {
+    s_mqtt_client.disconnect();
+    s_connection_state = MQTT_STATE_DISCONNECTED;
+}
+
+mqtt_client_state_t mqtt_sprite_get_state(void) {
+    return s_connection_state;
+}
+
+const char* mqtt_sprite_state_string(mqtt_client_state_t state) {
+    switch (state) {
+        case MQTT_STATE_DISCONNECTED: return "disconnected";
+        case MQTT_STATE_CONNECTING: return "connecting";
+        case MQTT_STATE_CONNECTED: return "connected";
+        case MQTT_STATE_ERROR: return "error";
+        default: return "unknown";
+    }
+}
