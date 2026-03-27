@@ -1,0 +1,120 @@
+name: shadow-ota
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'lib/**'
+      - 'platformio.ini'
+      - 'sdkconfig.*'
+  workflow_dispatch:
+    inputs:
+      force_deploy:
+        description: 'Force deploy even if no source changes'
+        type: boolean
+        default: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    outputs:
+      firmware_size: ${{ steps.size.outputs.size }}
+      firmware_hash: ${{ steps.size.outputs.hash }}
+      firmware_version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio
+          key: ${{ runner.os }}-pio-shadow-${{ hashFiles('platformio.ini') }}
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Extract firmware version
+        id: version
+        run: |
+          MAJOR=$(grep 'FW_MAJOR_VERSION' include/config.h | awk '{print $3}')
+          MINOR=$(grep 'FW_MINOR_VERSION' include/config.h | awk '{print $3}')
+          PATCH=$(grep 'FW_PATCH_VERSION' include/config.h | awk '{print $3}')
+          HASH=$(git rev-parse --short HEAD)
+          echo "version=${MAJOR}.${MINOR}.${PATCH}+${HASH}" >> "$GITHUB_OUTPUT"
+
+      - name: Build release firmware
+        env:
+          INCLUDE_GIT_HASH_IN_VERSION_NUMBER: "true"
+        run: pio run -e xteink_x4_release
+
+      - name: Firmware size gate
+        id: size
+        run: |
+          SIZE=$(stat -c%s .pio/build/xteink_x4_release/firmware.bin)
+          HASH=$(sha256sum .pio/build/xteink_x4_release/firmware.bin | cut -c1-16)
+          PERCENT=$(echo "scale=1; $SIZE * 100 / 1900544" | bc)
+          echo "size=$SIZE" >> "$GITHUB_OUTPUT"
+          echo "hash=$HASH" >> "$GITHUB_OUTPUT"
+          echo "## Firmware Build" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Version:** ${{ steps.version.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Size:** ${SIZE} bytes (${PERCENT}% of bank)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Hash:** ${HASH}" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$SIZE" -gt 1615000 ]; then
+            echo "::error::Firmware size ${SIZE} exceeds 85% of OTA bank"
+            exit 1
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: shadow-firmware-${{ steps.version.outputs.version }}
+          path: .pio/build/xteink_x4_release/firmware.bin
+          retention-days: 90
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: production
+
+    steps:
+      - name: Download firmware
+        uses: actions/download-artifact@v4
+        with:
+          name: shadow-firmware-${{ needs.build.outputs.firmware_version }}
+
+      - name: Deploy to shadowlab.cc
+        env:
+          DEPLOY_KEY: ${{ secrets.SHADOW_DEPLOY_KEY }}
+          DEPLOY_USER: ${{ secrets.SHADOW_DEPLOY_USER }}
+          DEPLOY_HOST: ${{ secrets.SHADOW_DEPLOY_HOST }}
+          FW_VERSION: ${{ needs.build.outputs.firmware_version }}
+          FW_SIZE: ${{ needs.build.outputs.firmware_size }}
+          FW_HASH: ${{ needs.build.outputs.firmware_hash }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$DEPLOY_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+          scp -i ~/.ssh/deploy_key firmware.bin "${DEPLOY_USER}@${DEPLOY_HOST}:/var/www/shadowlab.cc/firmware/xteink_x4.bin"
+
+          TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          printf '{"version":"%s","size":%s,"hash":"%s","timestamp":"%s","commit":"%s"}' \
+            "$FW_VERSION" "$FW_SIZE" "$FW_HASH" "$TIMESTAMP" "$GITHUB_SHA" | \
+            ssh -i ~/.ssh/deploy_key "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "cat > /var/www/shadowlab.cc/firmware/xteink_x4.json"
+
+          echo "## OTA Deployed" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **URL:** https://shadowlab.cc/firmware/xteink_x4.bin" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Version:** ${FW_VERSION}" >> "$GITHUB_STEP_SUMMARY"

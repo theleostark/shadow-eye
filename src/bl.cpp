@@ -1095,12 +1095,46 @@ https_request_err_e handleApiDisplayResponse(ApiDisplayResponse &apiResponse)
     {
       String image_url = apiResponse.image_url;
 #ifdef SHADOW_OTA_ENABLED
-      // Shadow Lab: check our own firmware server regardless of TRMNL BYOD restriction
+      // Shadow Lab: check version manifest before attempting OTA
+      // Only update if remote version differs from running version
       String firmware_url = apiResponse.firmware_url;
-      if (firmware_url.length() == 0) {
+      if (apiResponse.update_firmware) {
+        // TRMNL API explicitly requested update — honor it
+        update_firmware = true;
+      } else {
+        // Check Shadow Lab manifest for version comparison
         firmware_url = SHADOW_OTA_URL;
+        // Check manifest every 6th wake cycle (~84 min) to save battery
+        static RTC_DATA_ATTR uint8_t shadow_ota_check_counter = 0;
+        shadow_ota_check_counter++;
+        if (shadow_ota_check_counter >= 6) {
+          shadow_ota_check_counter = 0;
+          // Fetch version manifest (tiny JSON, <200 bytes)
+          HTTPClient manifest_http;
+          String manifest_url = String(SHADOW_OTA_URL);
+          manifest_url.replace(".bin", ".json");
+          manifest_http.begin(manifest_url);
+          manifest_http.setTimeout(5000);
+          int mc = manifest_http.GET();
+          if (mc == HTTP_CODE_OK) {
+            String payload = manifest_http.getString();
+            // Simple version check: if manifest contains our version string, skip
+            if (payload.indexOf(FW_VERSION_STRING) < 0) {
+              Log_info("[SHADOW OTA] New version available, triggering update");
+              update_firmware = true;
+            } else {
+              Log_info("[SHADOW OTA] Running latest version, skipping");
+              update_firmware = false;
+            }
+          } else {
+            Log_info("[SHADOW OTA] Manifest check failed (HTTP %d), skipping", mc);
+            update_firmware = false;
+          }
+          manifest_http.end();
+        } else {
+          update_firmware = false;
+        }
       }
-      update_firmware = apiResponse.update_firmware || (firmware_url.length() > 0);
 #else
       update_firmware = apiResponse.update_firmware;
       String firmware_url = apiResponse.firmware_url;
