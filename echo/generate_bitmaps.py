@@ -30,6 +30,7 @@ except ImportError:
 
 SCRIPT_DIR = Path(__file__).parent
 OUTPUT_DIR = SCRIPT_DIR / "generated"
+SRC_DIR = SCRIPT_DIR.parent / "src"
 
 # Bitmap specs matching originals
 BITMAPS = {
@@ -333,61 +334,36 @@ def _find_emoji_font(size: int):
 
 
 def _draw_moon(draw, cx: int, cy: int, radius: int):
-    """Draw a filled new moon circle (white circle = the shadow mark)."""
+    """Draw a black crescent moon on a white background."""
+    # Outer filled black circle
     draw.ellipse(
         [cx - radius, cy - radius, cx + radius, cy + radius],
-        fill=1,
+        fill=0,
     )
-    # New moon effect: overlay a slightly offset dark circle to create crescent
+    # Offset white circle punches crescent out of the black circle
     offset = int(radius * 0.25)
     inner_r = int(radius * 0.92)
     draw.ellipse(
         [cx - inner_r + offset, cy - inner_r - int(offset * 0.3),
          cx + inner_r + offset, cy + inner_r - int(offset * 0.3)],
-        fill=0,
+        fill=1,
     )
 
 
 def render_echo_wordmark(width: int, height: int) -> Image.Image:
     """
-    Render the ECHO logo: new moon symbol above "ECHO" text.
-    Brand mark: crescent moon (shadow made visible).
+    Render the ECHO logo: crescent moon mark only, centered.
+    No wordmark — mark stands alone on the e-paper canvas.
     For e-paper: white pixels = 1, black pixels = 0 in 1-bpp.
     """
-    img = Image.new('1', (width, height), 0)  # black background
+    img = Image.new('1', (width, height), 1)  # white background
     draw = ImageDraw.Draw(img)
 
-    # Layout: moon takes top 55%, text takes bottom 35%, 10% gap
-    moon_zone_h = int(height * 0.55)
-    text_zone_y = int(height * 0.62)
-    text_zone_h = int(height * 0.30)
-
-    # Draw moon mark
-    moon_radius = int(min(width, moon_zone_h) * 0.32)
+    # Moon centered, radius = 30% of the smaller dimension
+    moon_radius = int(min(width, height) * 0.30)
     moon_cx = width // 2
-    moon_cy = int(moon_zone_h * 0.48)
+    moon_cy = height // 2
     _draw_moon(draw, moon_cx, moon_cy, moon_radius)
-
-    # Draw "ECHO" text below
-    target_height = int(text_zone_h * 0.6)
-    font_size = max(target_height, 8)
-    font = _find_font(font_size)
-
-    bbox = draw.textbbox((0, 0), "ECHO", font=font)
-    text_w = bbox[2] - bbox[0]
-    text_h = bbox[3] - bbox[1]
-
-    # Scale if too wide
-    if text_w > width * 0.85:
-        font_size = int(font_size * (width * 0.85) / text_w)
-        font = _find_font(font_size)
-        bbox = draw.textbbox((0, 0), "ECHO", font=font)
-        text_w = bbox[2] - bbox[0]
-        text_h = bbox[3] - bbox[1]
-
-    x = (width - text_w) // 2 - bbox[0]
-    y = text_zone_y + (text_zone_h - text_h) // 2 - bbox[1]
-    draw.text((x, y), "ECHO", fill=1, font=font)
 
     return img
 
@@ -480,9 +456,11 @@ def main():
         header_text = format_c_header(spec['var'], bb_data, w, h)
         out_path = OUTPUT_DIR / spec['file']
         out_path.write_text(header_text)
+        # Also write to src/ so the firmware build picks it up
+        (SRC_DIR / spec['file']).write_text(header_text)
 
         created_files.append((out_path, len(bb_data)))
-        print(f"  -> {out_path} ({len(bb_data)} bytes compressed)")
+        print(f"  -> {out_path} + src/{spec['file']} ({len(bb_data)} bytes compressed)")
 
     # Generate QR code
     print(f"Generating wifi_failed_qr ({QR_SPEC['width']}x{QR_SPEC['height']})...")

@@ -1,16 +1,16 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-#define FW_MAJOR_VERSION 1
-#define FW_MINOR_VERSION 7
-#define FW_PATCH_VERSION 8
+#define FW_MAJOR_VERSION 0
+#define FW_MINOR_VERSION 0
+#define FW_PATCH_VERSION 1
 
 // Helper macros for stringification
 #define STRINGIFY(x) #x
 #define TOSTRING(x) STRINGIFY(x)
 
 #ifndef FW_VERSION_SUFFIX
-#define FW_VERSION_SUFFIX ""
+#define FW_VERSION_SUFFIX "-alpha"
 #endif
 
 // Compile-time firmware version string

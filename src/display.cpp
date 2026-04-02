@@ -1527,7 +1527,7 @@ void display_show_msg(uint8_t *image_buffer, MSG message_type)
     {
     case WIFI_CONNECT:
     {
-        const char string1[] = "Connect to TRMNL WiFi";
+        const char string1[] = "Connect to ECHO WiFi";
         bbep.getStringBox(string1, &rect);
         bbep.setCursor((bbep.width() - rect.w)/2, 430);
         bbep.println(string1);
@@ -1662,7 +1662,7 @@ void display_show_msg(uint8_t *image_buffer, MSG message_type)
     break;
     case API_SIZE_ERROR:
     {
-        const char string1[] = "WiFi connected, TRMNL content malformed.";
+        const char string1[] = "WiFi connected, ECHO content malformed.";
         bbep.getStringBox(string1, &rect);
 #ifdef __BB_EPAPER__
         bbep.setCursor((bbep.width() - rect.w) / 2, 400);
@@ -1987,7 +1987,7 @@ void display_show_msg(uint8_t *image_buffer, MSG message_type, String friendly_i
     case FRIENDLY_ID:
     {
         Log_info("friendly id case");
-        const char string1[] = "Please sign up at trmnl.com/start";
+        const char string1[] = "Please sign up at shadowlab.cc/echo";
         bbep.getStringBox(string1, &rect);
 #ifdef __BB_EPAPER__
         bbep.setCursor((bbep.width() - rect.w)/2, 400);
@@ -2015,7 +2015,7 @@ void display_show_msg(uint8_t *image_buffer, MSG message_type, String friendly_i
         string1 += fw_version;
         bbep.setCursor(40, 48); // place in upper left corner
         bbep.println(string1);
-        const char string2[] = "Connect your phone or computer to TRMNL WiFi network";
+        const char string2[] = "Connect your phone or computer to ECHO WiFi network";
         bbep.getStringBox(string2, &rect);
 #ifdef __BB_EPAPER__
         bbep.setCursor((bbep.width() - rect.w) / 2, 386);
