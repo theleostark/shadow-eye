@@ -1539,7 +1539,7 @@ void display_show_msg(uint8_t *image_buffer, MSG message_type)
     break;
     case WIFI_FAILED:
     {
-        String string0 = "TRMNL firmware ";
+        String string0 = "ECHO firmware ";
         string0 += FW_VERSION_STRING;
 #ifdef __BB_EPAPER__
         bbep.setCursor(40, 48); // place in upper left corner
@@ -1547,11 +1547,11 @@ void display_show_msg(uint8_t *image_buffer, MSG message_type)
         bbep.setCursor(80, 104); // place in upper left corner
 #endif
         bbep.println(string0);
-        const char string1[] = "Can't establish WiFi connection.";
+        const char string1[] = "Cannot connect to WiFi.";
         bbep.getStringBox(string1, &rect);
         bbep.setCursor((bbep.width() - rect.w)/2, bbep.height() - (rect.h*2)-140);
         bbep.println(string1);
-        const char string2[] = "Hold button on the back to reset WiFi, or scan QR Code for help.";
+        const char string2[] = "Hold side button 10s to reset WiFi. Visit shadowlab.cc/echo for help.";
         bbep.getStringBox(string2, &rect);
         bbep.setCursor((bbep.width() - rect.w) / 2, -1);
         bbep.println(string2);
@@ -2011,7 +2011,7 @@ void display_show_msg(uint8_t *image_buffer, MSG message_type, String friendly_i
     {
         Log_info("wifi connect case");
 
-        String string1 = "TRMNL firmware ";
+        String string1 = "ECHO firmware ";
         string1 += fw_version;
         bbep.setCursor(40, 48); // place in upper left corner
         bbep.println(string1);

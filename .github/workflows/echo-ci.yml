@@ -1,0 +1,238 @@
+name: echo-ci
+
+# ECHO Firmware CI/CD Pipeline
+# TRMNL base → rebrand → build → size-gate → test → deploy
+#
+# Version: ECHO 0.0.1-alpha (independent from TRMNL 1.7.8)
+# Binary:  echo-{version}.bin → shadowlab.cc/firmware/echo.bin
+
+on:
+  push:
+    branches: [main, "echo/**"]
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'lib/**'
+      - 'echo/**'
+      - 'platformio.ini'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      skip_deploy:
+        description: 'Build only, skip deployment'
+        type: boolean
+        default: false
+
+env:
+  PIO_ENV: xteink_x4_release
+  OTA_BANK_SIZE: 1900544
+  SIZE_GATE_PCT: 85
+
+jobs:
+  # ── Stage 1: Rebrand Audit ──────────────────────────────────────
+  rebrand:
+    name: rebrand-audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    outputs:
+      echo_version: ${{ steps.version.outputs.echo_version }}
+      trmnl_version: ${{ steps.version.outputs.trmnl_version }}
+      critical_count: ${{ steps.scan.outputs.critical }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Read ECHO version
+        id: version
+        run: |
+          MAJOR=$(python3 -c "import json; print(json.load(open('echo/version.json'))['version']['major'])")
+          MINOR=$(python3 -c "import json; print(json.load(open('echo/version.json'))['version']['minor'])")
+          PATCH=$(python3 -c "import json; print(json.load(open('echo/version.json'))['version']['patch'])")
+          TAG=$(python3 -c "import json; print(json.load(open('echo/version.json'))['version']['tag'])")
+          HASH=$(git rev-parse --short HEAD)
+          TRMNL_MAJOR=$(grep 'FW_MAJOR_VERSION' include/config.h | awk '{print $3}')
+          TRMNL_MINOR=$(grep 'FW_MINOR_VERSION' include/config.h | awk '{print $3}')
+          TRMNL_PATCH=$(grep 'FW_PATCH_VERSION' include/config.h | awk '{print $3}')
+
+          echo "echo_version=${MAJOR}.${MINOR}.${PATCH}-${TAG}+${HASH}" >> "$GITHUB_OUTPUT"
+          echo "trmnl_version=${TRMNL_MAJOR}.${TRMNL_MINOR}.${TRMNL_PATCH}" >> "$GITHUB_OUTPUT"
+
+      - name: Rebrand dry-run scan
+        id: scan
+        run: |
+          python3 echo/rebrand.py --dry-run --report
+          CRITICAL=$(python3 -c "import json; print(json.load(open('echo/rebrand-report.json'))['critical'])")
+          echo "critical=${CRITICAL}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload rebrand report
+        uses: actions/upload-artifact@v7
+        with:
+          name: rebrand-report
+          path: echo/rebrand-report.json
+          retention-days: 30
+
+  # ── Stage 2: Build ──────────────────────────────────────────────
+  build:
+    name: build-echo
+    needs: rebrand
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    outputs:
+      firmware_size: ${{ steps.gate.outputs.size }}
+      firmware_hash: ${{ steps.gate.outputs.hash }}
+      size_pct: ${{ steps.gate.outputs.pct }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio
+          key: ${{ runner.os }}-pio-echo-${{ hashFiles('platformio.ini') }}
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Apply ECHO rebrand
+        run: python3 echo/rebrand.py --apply
+
+      - name: Build firmware
+        env:
+          INCLUDE_GIT_HASH_IN_VERSION_NUMBER: "true"
+          ECHO_VERSION: ${{ needs.rebrand.outputs.echo_version }}
+        run: pio run -e $PIO_ENV
+
+      - name: Size gate
+        id: gate
+        env:
+          PIO_BUILD_ENV: ${{ env.PIO_ENV }}
+        run: |
+          BIN=".pio/build/${PIO_BUILD_ENV}/firmware.bin"
+          SIZE=$(stat -c%s "$BIN")
+          HASH=$(sha256sum "$BIN" | cut -c1-16)
+          PCT=$(echo "scale=1; $SIZE * 100 / ${OTA_BANK_SIZE}" | bc)
+          LIMIT=$(echo "${OTA_BANK_SIZE} * ${SIZE_GATE_PCT} / 100" | bc)
+
+          echo "size=$SIZE" >> "$GITHUB_OUTPUT"
+          echo "hash=$HASH" >> "$GITHUB_OUTPUT"
+          echo "pct=$PCT" >> "$GITHUB_OUTPUT"
+
+          if [ "$SIZE" -gt "$LIMIT" ]; then
+            echo "::error::ECHO firmware $SIZE bytes exceeds $SIZE_GATE_PCT% of OTA bank"
+            exit 1
+          fi
+
+      - name: Package ECHO binaries
+        env:
+          ECHO_VER: ${{ needs.rebrand.outputs.echo_version }}
+          PIO_BUILD_ENV: ${{ env.PIO_ENV }}
+        run: |
+          SAFE_VER=$(echo "$ECHO_VER" | tr '+' '-')
+          cp ".pio/build/${PIO_BUILD_ENV}/firmware.bin" "echo-${SAFE_VER}.bin"
+          cp ".pio/build/${PIO_BUILD_ENV}/firmware.bin" "echo.bin"
+
+      - name: Upload ECHO firmware
+        uses: actions/upload-artifact@v7
+        with:
+          name: echo-firmware
+          path: echo*.bin
+          retention-days: 90
+
+  # ── Stage 3: Test ───────────────────────────────────────────────
+  test:
+    name: unit-tests
+    needs: rebrand
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio
+          key: ${{ runner.os }}-pio-test-${{ hashFiles('platformio.ini') }}
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Run native tests
+        run: pio test -e native
+
+  # ── Stage 4: Deploy ─────────────────────────────────────────────
+  deploy:
+    name: deploy-ota
+    needs: [rebrand, build, test]
+    if: github.ref == 'refs/heads/main' && github.event.inputs.skip_deploy != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: production
+
+    steps:
+      - name: Download ECHO firmware
+        uses: actions/download-artifact@v4
+        with:
+          name: echo-firmware
+
+      - name: Deploy to shadowlab.cc
+        env:
+          DEPLOY_KEY: ${{ secrets.SHADOW_DEPLOY_KEY }}
+          DEPLOY_USER: ${{ secrets.SHADOW_DEPLOY_USER }}
+          DEPLOY_HOST: ${{ secrets.SHADOW_DEPLOY_HOST }}
+          ECHO_VER: ${{ needs.rebrand.outputs.echo_version }}
+          TRMNL_VER: ${{ needs.rebrand.outputs.trmnl_version }}
+          FW_SIZE: ${{ needs.build.outputs.firmware_size }}
+          FW_HASH: ${{ needs.build.outputs.firmware_hash }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$DEPLOY_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+          # Deploy canonical binary
+          scp -i ~/.ssh/deploy_key echo.bin \
+            "${DEPLOY_USER}@${DEPLOY_HOST}:/var/www/shadowlab.cc/firmware/echo.bin"
+
+          # Deploy versioned binary
+          SAFE_VER=$(echo "$ECHO_VER" | tr '+' '-')
+          scp -i ~/.ssh/deploy_key "echo-${SAFE_VER}.bin" \
+            "${DEPLOY_USER}@${DEPLOY_HOST}:/var/www/shadowlab.cc/firmware/echo-${SAFE_VER}.bin"
+
+          # Deploy metadata
+          TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          python3 -c "
+          import json, os
+          meta = {
+              'product': 'ECHO',
+              'echo_version': os.environ['ECHO_VER'],
+              'trmnl_base': os.environ['TRMNL_VER'],
+              'size': int(os.environ['FW_SIZE']),
+              'hash': os.environ['FW_HASH'],
+              'timestamp': '$TIMESTAMP',
+              'commit': os.environ.get('GITHUB_SHA', ''),
+              'ota_url': 'https://shadowlab.cc/firmware/echo.bin'
+          }
+          print(json.dumps(meta, indent=2))
+          " > /tmp/echo-meta.json
+
+          scp -i ~/.ssh/deploy_key /tmp/echo-meta.json \
+            "${DEPLOY_USER}@${DEPLOY_HOST}:/var/www/shadowlab.cc/firmware/echo.json"

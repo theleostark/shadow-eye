@@ -1,0 +1,41 @@
+{
+  "product": "ECHO",
+  "codename": "shadow-light",
+  "version": {
+    "major": 0,
+    "minor": 0,
+    "patch": 1,
+    "tag": "alpha"
+  },
+  "base": {
+    "firmware": "TRMNL",
+    "version": "1.7.8",
+    "upstream": "https://github.com/usetrmnl/trmnl-firmware"
+  },
+  "identity": {
+    "manufacturer": "Shadow Lab",
+    "domain": "shadowlab.cc",
+    "ota_url": "https://shadowlab.cc/firmware/echo.bin",
+    "metadata_url": "https://shadowlab.cc/firmware/echo.json",
+    "heartbeat_url": "https://shadowlab.cc/api/echo/heartbeat",
+    "captive_ssid": "ECHO",
+    "mdns_service": "_shadowlab._tcp",
+    "preferences_namespace": "shadow_echo"
+  },
+  "hardware": {
+    "target": "xteink_x4",
+    "mcu": "ESP32-C3",
+    "display": "EP426_800x480",
+    "controller": "SSD1677"
+  },
+  "schema": {
+    "version_format": "ECHO {major}.{minor}.{patch}-{tag}+{commit}",
+    "binary_name": "echo-{major}.{minor}.{patch}-{tag}.bin",
+    "notes": [
+      "Major: breaking changes to data paths or mesh protocol",
+      "Minor: new features (display modes, primitives, integrations)",
+      "Patch: bug fixes, rebrand string changes, optimization",
+      "Tag: alpha → beta → rc → (empty for release)"
+    ]
+  }
+}

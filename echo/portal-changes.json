@@ -1,0 +1,311 @@
+{
+  "source_file": "lib/wificaptive/src/WifiCaptivePage.h",
+  "arrays_found": 3,
+  "total_replacements": 40,
+  "echo_design_tokens": {
+    "violet": "#8b5cf6",
+    "dark_bg": "#05050a",
+    "light_text": "#eaeaf2",
+    "paper_light": "#f5f2ed"
+  },
+  "arrays": [
+    {
+      "name": "ADVANCED_HTML",
+      "original_gz_bytes": 4146,
+      "original_html_bytes": 17182,
+      "rebranded_html_bytes": 17739,
+      "rebranded_gz_bytes": 4357,
+      "replacements": [
+        {
+          "description": "Advanced config page title",
+          "category": "html",
+          "occurrences": 1,
+          "matched": "<title>TRMNL Advanced Configuration</title>",
+          "replacement_preview": "<title>ECHO Advanced Setup</title>"
+        },
+        {
+          "description": "Input focus border color",
+          "category": "css",
+          "occurrences": 1,
+          "matched": "border: 2px solid #F86527",
+          "replacement_preview": "border: 2px solid #8b5cf6"
+        },
+        {
+          "description": "Success button background",
+          "category": "css",
+          "occurrences": 1,
+          "matched": "background-color: #F86527",
+          "replacement_preview": "background-color: #8b5cf6"
+        },
+        {
+          "description": "Loader spinner accent color",
+          "category": "css",
+          "occurrences": 1,
+          "matched": "border-top: 6px solid #F86527",
+          "replacement_preview": "border-top: 6px solid #8b5cf6"
+        },
+        {
+          "description": "Replace TRMNL logo image with inline ECHO wordmark SVG",
+          "category": "svg",
+          "matched": "<img src=\"/logo.svg\" style=\"margin-left: auto; margin-right: auto; width: 50%; display: block;\" />",
+          "replacement_preview": "<div style=\"text-align:center;margin:20px 0;\"><svg width=\"160\" height=\"48\" viewBox=\"0 0 160 48\" fill"
+        },
+        {
+          "description": "Soft reset confirmation dialog text",
+          "category": "text",
+          "occurrences": 1,
+          "matched": "Soft resetting your TRMNL device",
+          "replacement_preview": "Soft resetting your ECHO device"
+        },
+        {
+          "description": "Custom server warning dialog text",
+          "category": "text",
+          "occurrences": 1,
+          "matched": "will use the official server with their TRMNL",
+          "replacement_preview": "will use the official server with their ECHO device"
+        },
+        {
+          "description": "Custom server placeholder URL",
+          "category": "text",
+          "occurrences": 1,
+          "matched": "https://trmnl.app",
+          "replacement_preview": "https://shadowlab.cc/echo"
+        },
+        {
+          "description": "Apply ECHO dark background and light text to body",
+          "category": "css",
+          "occurrences": 1,
+          "matched": "font: 400 14px 'Calibri', 'Arial';",
+          "replacement_preview": "font: 400 14px 'Calibri', 'Arial'; background-color: #05050a; color: #eaeaf2;"
+        },
+        {
+          "description": "Table background from white to dark",
+          "category": "css",
+          "occurrences": 1,
+          "matched": "background: white;",
+          "replacement_preview": "background: #05050a;"
+        },
+        {
+          "description": "Table row hover highlight",
+          "category": "css",
+          "occurrences": 1,
+          "matched": "background: #f2f2f2;",
+          "replacement_preview": "background: rgba(139, 92, 246, 0.15);"
+        },
+        {
+          "description": "Selected row background",
+          "category": "css",
+          "occurrences": 1,
+          "matched": "background-color: #BBBB;",
+          "replacement_preview": "background-color: rgba(139, 92, 246, 0.3);"
+        },
+        {
+          "description": "Table row border color",
+          "category": "css",
+          "occurrences": 1,
+          "matched": "border-bottom: 1px solid #BBBB;",
+          "replacement_preview": "border-bottom: 1px solid rgba(234, 234, 242, 0.15);"
+        },
+        {
+          "description": "Modal content background",
+          "category": "css",
+          "occurrences": 1,
+          "matched": "background-color: #fefefe;",
+          "replacement_preview": "background-color: #1a1a2e;"
+        },
+        {
+          "description": "Alert primary colors for dark theme",
+          "category": "css",
+          "matched": "color: #383d41;\r\n      background-color: #e2e3e5;\r\n      border-color: #d6d8db;",
+          "replacement_preview": "color: #eaeaf2;\n      background-color: rgba(139, 92, 246, 0.15);\n      border-color: rgba(139, 92, "
+        },
+        {
+          "description": "Primary button dark theme",
+          "category": "css",
+          "matched": "background-color: #e4eaf0;\r\n      color: #212529;",
+          "replacement_preview": "background-color: #2a2a3e;\n      color: #eaeaf2;"
+        },
+        {
+          "description": "Primary button hover dark theme",
+          "category": "css",
+          "occurrences": 1,
+          "matched": "background-color: #d7dfe8;",
+          "replacement_preview": "background-color: #3a3a52;"
+        },
+        {
+          "description": "Loader spinner base ring dark theme",
+          "category": "css",
+          "occurrences": 1,
+          "matched": "border: 6px solid #f3f3f3;",
+          "replacement_preview": "border: 6px solid #2a2a3e;"
+        },
+        {
+          "description": "Modal close button color",
+          "category": "css",
+          "occurrences": 1,
+          "matched": "color: #aaa;",
+          "replacement_preview": "color: rgba(234, 234, 242, 0.5);"
+        },
+        {
+          "description": "Modal close button hover color",
+          "category": "css",
+          "matched": "color: black;\r\n      text-decoration: none;",
+          "replacement_preview": "color: #eaeaf2;\n      text-decoration: none;"
+        }
+      ]
+    },
+    {
+      "name": "INDEX_HTML",
+      "original_gz_bytes": 5873,
+      "original_html_bytes": 23843,
+      "rebranded_html_bytes": 24412,
+      "rebranded_gz_bytes": 6044,
+      "replacements": [
+        {
+          "description": "Main portal page title",
+          "category": "html",
+          "occurrences": 1,
+          "matched": "<title>TRMNL Wi-Fi Configuration</title>",
+          "replacement_preview": "<title>ECHO Wi-Fi Setup</title>"
+        },
+        {
+          "description": "Input focus border color",
+          "category": "css",
+          "occurrences": 1,
+          "matched": "border: 2px solid #F86527",
+          "replacement_preview": "border: 2px solid #8b5cf6"
+        },
+        {
+          "description": "Success button background",
+          "category": "css",
+          "occurrences": 1,
+          "matched": "background-color: #F86527",
+          "replacement_preview": "background-color: #8b5cf6"
+        },
+        {
+          "description": "Loader spinner accent color",
+          "category": "css",
+          "occurrences": 1,
+          "matched": "border-top: 6px solid #F86527",
+          "replacement_preview": "border-top: 6px solid #8b5cf6"
+        },
+        {
+          "description": "Replace TRMNL logo image with inline ECHO wordmark SVG",
+          "category": "svg",
+          "matched": "<img src=\"/logo.svg\" style=\"margin-left: auto; margin-right: auto; width: 50%; display: block;\" />",
+          "replacement_preview": "<div style=\"text-align:center;margin:20px 0;\"><svg width=\"160\" height=\"48\" viewBox=\"0 0 160 48\" fill"
+        },
+        {
+          "description": "Custom server placeholder URL",
+          "category": "text",
+          "occurrences": 1,
+          "matched": "https://trmnl.app",
+          "replacement_preview": "https://shadowlab.cc/echo"
+        },
+        {
+          "description": "Apply ECHO dark background and light text to body",
+          "category": "css",
+          "occurrences": 1,
+          "matched": "font: 400 14px 'Calibri', 'Arial';",
+          "replacement_preview": "font: 400 14px 'Calibri', 'Arial'; background-color: #05050a; color: #eaeaf2;"
+        },
+        {
+          "description": "Table background from white to dark",
+          "category": "css",
+          "occurrences": 1,
+          "matched": "background: white;",
+          "replacement_preview": "background: #05050a;"
+        },
+        {
+          "description": "Table row hover highlight",
+          "category": "css",
+          "occurrences": 1,
+          "matched": "background: #f2f2f2;",
+          "replacement_preview": "background: rgba(139, 92, 246, 0.15);"
+        },
+        {
+          "description": "Selected row background",
+          "category": "css",
+          "occurrences": 1,
+          "matched": "background-color: #BBBB;",
+          "replacement_preview": "background-color: rgba(139, 92, 246, 0.3);"
+        },
+        {
+          "description": "Table row border color",
+          "category": "css",
+          "occurrences": 1,
+          "matched": "border-bottom: 1px solid #BBBB;",
+          "replacement_preview": "border-bottom: 1px solid rgba(234, 234, 242, 0.15);"
+        },
+        {
+          "description": "Modal content background",
+          "category": "css",
+          "occurrences": 1,
+          "matched": "background-color: #fefefe;",
+          "replacement_preview": "background-color: #1a1a2e;"
+        },
+        {
+          "description": "Alert primary colors for dark theme",
+          "category": "css",
+          "matched": "color: #383d41;\r\n      background-color: #e2e3e5;\r\n      border-color: #d6d8db;",
+          "replacement_preview": "color: #eaeaf2;\n      background-color: rgba(139, 92, 246, 0.15);\n      border-color: rgba(139, 92, "
+        },
+        {
+          "description": "Primary button dark theme",
+          "category": "css",
+          "matched": "background-color: #e4eaf0;\r\n      color: #212529;",
+          "replacement_preview": "background-color: #2a2a3e;\n      color: #eaeaf2;"
+        },
+        {
+          "description": "Primary button hover dark theme",
+          "category": "css",
+          "occurrences": 1,
+          "matched": "background-color: #d7dfe8;",
+          "replacement_preview": "background-color: #3a3a52;"
+        },
+        {
+          "description": "Loader spinner base ring dark theme",
+          "category": "css",
+          "occurrences": 1,
+          "matched": "border: 6px solid #f3f3f3;",
+          "replacement_preview": "border: 6px solid #2a2a3e;"
+        },
+        {
+          "description": "Caption text color for dark theme",
+          "category": "css",
+          "occurrences": 1,
+          "matched": "color: #6c757d;",
+          "replacement_preview": "color: rgba(234, 234, 242, 0.6);"
+        },
+        {
+          "description": "Modal close button color",
+          "category": "css",
+          "occurrences": 1,
+          "matched": "color: #aaa;",
+          "replacement_preview": "color: rgba(234, 234, 242, 0.5);"
+        },
+        {
+          "description": "Modal close button hover color",
+          "category": "css",
+          "matched": "color: black;\r\n      text-decoration: none;",
+          "replacement_preview": "color: #eaeaf2;\n      text-decoration: none;"
+        }
+      ]
+    },
+    {
+      "name": "LOGO_SVG",
+      "original_gz_bytes": 1022,
+      "original_html_bytes": 2726,
+      "rebranded_html_bytes": 448,
+      "rebranded_gz_bytes": 263,
+      "replacements": [
+        {
+          "description": "Full SVG replacement with ECHO wordmark",
+          "category": "svg",
+          "matched": "entire TRMNL logo SVG",
+          "replacement_preview": "ECHO monospace wordmark + SHADOW LAB subtitle"
+        }
+      ]
+    }
+  ]
+}

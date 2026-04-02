@@ -101,8 +101,8 @@ int mdns_discovery_browse(DiscoveredServer* servers, int max_servers) {
             IPAddress ip = MDNS.IP(i);
             uint16_t port = MDNS.port(i);
 
-            // Check if hostname contains "trmnl" (case-insensitive)
-            bool is_trmnl = (hostname.indexOf("trmnl") >= 0 ||
+            // Check if hostname contains "echo" (case-insensitive)
+            bool is_trmnl = (hostname.indexOf("echo") >= 0 ||
                             hostname.indexOf("TRMNL") >= 0 ||
                             hostname.indexOf("Trmnl") >= 0);
 
