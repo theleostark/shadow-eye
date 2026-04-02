@@ -279,11 +279,14 @@ WifiConnectionResult initiateConnectionAndWaitForOutcome(const WifiCredentials c
         // regular connection
         WiFi.mode(WIFI_STA);
 
+        // Accept all security modes including WPA3 (required for iPhone hotspots)
+        WiFi.setMinSecurity(WIFI_AUTH_OPEN);
+
         // Configure static IP if specified (must be before WiFi.begin)
         configureStaticIP(credentials);
 
         beginResult = WiFi.begin(credentials.ssid.c_str(), credentials.pswd.c_str());
-        Log_info("WiFi: begin (WPA2-Personal), starting from status %s", wifiStatusStr(beginResult));
+        Log_info("WiFi: begin (WPA2/WPA3-Personal), starting from status %s", wifiStatusStr(beginResult));
     }
 
     auto result = waitForConnectResult(CONNECTION_TIMEOUT);

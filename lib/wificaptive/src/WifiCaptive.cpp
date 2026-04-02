@@ -104,7 +104,26 @@ bool WifiCaptive::startPortal()
             Log_info("Connecting with static IP: %s, IP: %s",
                      credentials.useStaticIP ? "yes" : "no",
                      credentials.staticIP.c_str());
-            bool res = connect(credentials) == WL_CONNECTED;
+
+            // Retry loop — phone hotspots often need 2-3 attempts
+            bool res = false;
+            for (int portal_attempt = 0; portal_attempt < WIFI_CONNECTION_ATTEMPTS; portal_attempt++)
+            {
+                Log_info("Portal connect attempt %d/%d to %s",
+                         portal_attempt + 1, WIFI_CONNECTION_ATTEMPTS,
+                         credentials.ssid.c_str());
+                res = connect(credentials) == WL_CONNECTED;
+                if (res) break;
+
+                WiFi.disconnect();
+                if (portal_attempt < WIFI_CONNECTION_ATTEMPTS - 1)
+                {
+                    uint32_t backoff = 2000 * (1 << portal_attempt);
+                    Log_info("Portal connect failed, retry in %d ms", backoff);
+                    delay(backoff);
+                }
+            }
+
             if (res)
             {
                 saveWifiCredentials(credentials);

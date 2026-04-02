@@ -25,7 +25,8 @@
 // Define the maximum number of connection attempts
 #define WIFI_CONNECTION_ATTEMPTS 3
 // Define max connection timeout
-#define CONNECTION_TIMEOUT 15000
+// 30s timeout — phone hotspots need longer for WPA3 + DHCP
+#define CONNECTION_TIMEOUT 30000
 
 #define WIFI_SSID_KEY(i) ("wifi_" + String(i) + "_ssid").c_str()
 #define WIFI_PSWD_KEY(i) ("wifi_" + String(i) + "_pswd").c_str()
