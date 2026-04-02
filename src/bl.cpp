@@ -73,6 +73,11 @@ MSG current_msg = NONE;
 SPECIAL_FUNCTION special_function = SF_NONE;
 RTC_DATA_ATTR uint8_t need_to_refresh_display = 1;
 
+// RTC-persisted WiFi channel cache — survives deep sleep, skips 13-channel scan
+RTC_DATA_ATTR uint8_t cached_wifi_channel = 0;
+RTC_DATA_ATTR uint8_t cached_wifi_bssid[6] = {0};
+RTC_DATA_ATTR bool cached_wifi_valid = false;
+
 Preferences preferences;
 PreferencesPersistence preferencesPersistence(preferences);
 StoredLogs storedLogs(LOG_MAX_NOTES_NUMBER / 2, LOG_MAX_NOTES_NUMBER / 2, PREFERENCES_LOG_KEY, PREFERENCES_LOG_BUFFER_HEAD_KEY, preferencesPersistence);
@@ -367,9 +372,23 @@ void bl_init(void)
       String ip = String(WiFi.localIP());
       Log.info("%s [%d]:wifi_connection [DEBUG]: Connected: %s\r\n", __FILE__, __LINE__, ip.c_str());
       preferences.putInt(PREFERENCES_CONNECT_WIFI_RETRY_COUNT, 1);
+
+      // Cache WiFi channel + BSSID in RTC memory for fast reconnect after deep sleep
+      cached_wifi_channel = WiFi.channel();
+      uint8_t *bssid = WiFi.BSSID();
+      if (bssid != nullptr) {
+        memcpy(cached_wifi_bssid, bssid, 6);
+        cached_wifi_valid = true;
+        Log.info("%s [%d]: RTC WiFi cache saved — ch:%d BSSID:%s\r\n", __FILE__, __LINE__,
+                 cached_wifi_channel, WiFi.BSSIDstr().c_str());
+      }
     }
     else
     {
+      // Invalidate RTC WiFi cache on connection failure
+      cached_wifi_valid = false;
+      Log.info("%s [%d]: RTC WiFi cache invalidated — connection failed\r\n", __FILE__, __LINE__);
+
       if (current_msg != WIFI_FAILED)
       {
         showMessageWithLogo(WIFI_FAILED);
@@ -2125,7 +2144,48 @@ static void goToSleep(void)
 #error "Unsupported ESP32 target for GPIO wakeup configuration"
 #endif
 #ifdef BOARD_XTEINK_X4
-  gpio_hold_en(GPIO_NUM_13); // MOSFET enabling the battery power
+  // ── Drive SPI/EPD pins to defined state before deep sleep ──────────
+  // Floating GPIO pins on the SPI bus cause 300-1200 uA parasitic drain.
+  // Drive all output pins LOW and hold them through deep sleep.
+
+  // EPD_SCK (GPIO 8) — SPI clock
+  gpio_set_direction((gpio_num_t)EPD_SCK_PIN, GPIO_MODE_OUTPUT);
+  gpio_set_level((gpio_num_t)EPD_SCK_PIN, 0);
+  gpio_hold_en((gpio_num_t)EPD_SCK_PIN);
+
+  // EPD_MOSI (GPIO 10) — SPI data
+  gpio_set_direction((gpio_num_t)EPD_MOSI_PIN, GPIO_MODE_OUTPUT);
+  gpio_set_level((gpio_num_t)EPD_MOSI_PIN, 0);
+  gpio_hold_en((gpio_num_t)EPD_MOSI_PIN);
+
+  // EPD_CS (GPIO 21) — SPI chip select
+  gpio_set_direction((gpio_num_t)EPD_CS_PIN, GPIO_MODE_OUTPUT);
+  gpio_set_level((gpio_num_t)EPD_CS_PIN, 0);
+  gpio_hold_en((gpio_num_t)EPD_CS_PIN);
+
+  // EPD_DC (GPIO 4) — data/command select
+  gpio_set_direction((gpio_num_t)EPD_DC_PIN, GPIO_MODE_OUTPUT);
+  gpio_set_level((gpio_num_t)EPD_DC_PIN, 0);
+  gpio_hold_en((gpio_num_t)EPD_DC_PIN);
+
+  // EPD_RST (GPIO 5) — display reset (active low, hold LOW is safe)
+  gpio_set_direction((gpio_num_t)EPD_RST_PIN, GPIO_MODE_OUTPUT);
+  gpio_set_level((gpio_num_t)EPD_RST_PIN, 0);
+  gpio_hold_en((gpio_num_t)EPD_RST_PIN);
+
+  // EPD_BUSY (GPIO 6) — input from display; pull down to prevent floating
+  gpio_set_direction((gpio_num_t)EPD_BUSY_PIN, GPIO_MODE_INPUT);
+  gpio_pulldown_en((gpio_num_t)EPD_BUSY_PIN);
+  gpio_pullup_dis((gpio_num_t)EPD_BUSY_PIN);
+
+  // PIN_BATTERY (GPIO 0) — ADC input; pull down after battery read is done
+  gpio_set_direction((gpio_num_t)PIN_BATTERY, GPIO_MODE_INPUT);
+  gpio_pulldown_en((gpio_num_t)PIN_BATTERY);
+  gpio_pullup_dis((gpio_num_t)PIN_BATTERY);
+
+  // GPIO 13 — MOSFET power gate (already HIGH from init; hold through sleep)
+  gpio_hold_en(GPIO_NUM_13);
+
   gpio_deep_sleep_hold_en(); // Needed to keep the battery power enabled during RTC sleep
 #endif
   esp_deep_sleep_start();

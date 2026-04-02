@@ -69,7 +69,8 @@ private:
     std::vector<Network> combineNetworks(std::vector<Network> &scanResults, WifiCredentials wifiCredentials[]);
 
 public:
-    wl_status_t connect(const WifiCredentials credentials);
+    wl_status_t connect(const WifiCredentials credentials,
+                        uint8_t channel = 0, const uint8_t *bssid = nullptr);
 
     /// @brief Starts WiFi configuration portal.
     /// @return True if successfully connected to provided SSID, false otherwise.

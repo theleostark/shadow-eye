@@ -158,7 +158,9 @@ void captureEventData(WiFiEvent_t event, WiFiEventInfo_t info, WifiEventData *ev
     }
 }
 
-WifiConnectionResult initiateConnectionAndWaitForOutcome(const WifiCredentials credentials)
+WifiConnectionResult initiateConnectionAndWaitForOutcome(const WifiCredentials credentials,
+                                                          uint8_t channel,
+                                                          const uint8_t *bssid)
 {
     WifiEventData eventData;
 
@@ -269,7 +271,13 @@ WifiConnectionResult initiateConnectionAndWaitForOutcome(const WifiCredentials c
         // Configure static IP if specified (must be before WiFi.begin)
         configureStaticIP(credentials);
 
-        WiFi.begin(credentials.ssid.c_str());
+        if (channel > 0 && bssid != nullptr) {
+            Log_info("WiFi: Enterprise begin with cached ch:%d BSSID:%02X:%02X:%02X:%02X:%02X:%02X",
+                     channel, bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5]);
+            WiFi.begin(credentials.ssid.c_str(), nullptr, channel, bssid);
+        } else {
+            WiFi.begin(credentials.ssid.c_str());
+        }
 
         beginResult = WiFi.status();
         Log_info("WiFi: WPA2 Enterprise configured, starting from status %s", wifiStatusStr(beginResult));
@@ -285,7 +293,13 @@ WifiConnectionResult initiateConnectionAndWaitForOutcome(const WifiCredentials c
         // Configure static IP if specified (must be before WiFi.begin)
         configureStaticIP(credentials);
 
-        beginResult = WiFi.begin(credentials.ssid.c_str(), credentials.pswd.c_str());
+        if (channel > 0 && bssid != nullptr) {
+            Log_info("WiFi: begin with cached ch:%d BSSID:%02X:%02X:%02X:%02X:%02X:%02X",
+                     channel, bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5]);
+            beginResult = WiFi.begin(credentials.ssid.c_str(), credentials.pswd.c_str(), channel, bssid);
+        } else {
+            beginResult = WiFi.begin(credentials.ssid.c_str(), credentials.pswd.c_str());
+        }
         Log_info("WiFi: begin (WPA2/WPA3-Personal), starting from status %s", wifiStatusStr(beginResult));
     }
 

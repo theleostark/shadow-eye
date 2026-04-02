@@ -187,6 +187,10 @@ void WifiCaptive::resetSettings()
 {
     Log_info("Resetting WiFi settings");
 
+    // Invalidate RTC WiFi channel cache
+    cached_wifi_valid = false;
+    cached_wifi_channel = 0;
+
     Preferences preferences;
     preferences.begin("wificaptive", false);
     preferences.remove("api_url");
@@ -225,7 +229,8 @@ void WifiCaptive::resetSettings()
     WiFi.eraseAP();
 }
 
-wl_status_t WifiCaptive::connect(const WifiCredentials credentials)
+wl_status_t WifiCaptive::connect(const WifiCredentials credentials,
+                                  uint8_t channel, const uint8_t *bssid)
 {
     wl_status_t connRes = WL_NO_SSID_AVAIL;
 
@@ -233,7 +238,7 @@ wl_status_t WifiCaptive::connect(const WifiCredentials credentials)
     {
         WiFi.enableSTA(true);
 
-        auto result = initiateConnectionAndWaitForOutcome(credentials);
+        auto result = initiateConnectionAndWaitForOutcome(credentials, channel, bssid);
         connRes = result.status;
     }
 
@@ -617,6 +622,48 @@ bool WifiCaptive::autoConnect()
 
 bool WifiCaptive::tryConnectWithRetries(const WifiCredentials creds, int last_used_index)
 {
+    // Fast path: try cached WiFi channel + BSSID first (skips 13-channel scan)
+    if (cached_wifi_valid && cached_wifi_channel > 0)
+    {
+        Log_info("RTC WiFi cache: fast connect ch:%d BSSID:%02X:%02X:%02X:%02X:%02X:%02X",
+                 cached_wifi_channel,
+                 cached_wifi_bssid[0], cached_wifi_bssid[1], cached_wifi_bssid[2],
+                 cached_wifi_bssid[3], cached_wifi_bssid[4], cached_wifi_bssid[5]);
+
+        unsigned long fast_start = millis();
+        connect(creds, cached_wifi_channel, cached_wifi_bssid);
+
+        if (WiFi.status() == WL_CONNECTED)
+        {
+            unsigned long fast_elapsed = millis() - fast_start;
+            Log_info("RTC WiFi cache: fast connect SUCCESS in %lu ms", fast_elapsed);
+
+            // Update cache (AP may have moved to a different BSSID on same channel)
+            cached_wifi_channel = WiFi.channel();
+            uint8_t *bssid = WiFi.BSSID();
+            if (bssid != nullptr) {
+                memcpy(cached_wifi_bssid, bssid, 6);
+            }
+
+            if (last_used_index >= 0)
+            {
+                saveLastUsedWifiIndex(last_used_index);
+            }
+            return true;
+        }
+
+        // Fast path failed — AP likely changed channel, invalidate cache
+        Log_info("RTC WiFi cache: fast connect FAILED, invalidating cache and falling back to full scan");
+        cached_wifi_valid = false;
+        WiFi.disconnect();
+
+        if (creds.isEnterprise)
+        {
+            disableWpa2Enterprise();
+        }
+    }
+
+    // Normal path: full scan (no channel/bssid hint)
     for (int attempt = 0; attempt < WIFI_CONNECTION_ATTEMPTS; attempt++)
     {
         Log_info("Attempt %d to connect to %s (Enterprise: %s, Static IP: %s, IP: %s)",
@@ -628,6 +675,19 @@ bool WifiCaptive::tryConnectWithRetries(const WifiCredentials creds, int last_us
         if (WiFi.status() == WL_CONNECTED)
         {
             Log_info("Connected to %s", creds.ssid.c_str());
+
+            // Cache the channel + BSSID for next wake cycle
+            cached_wifi_channel = WiFi.channel();
+            uint8_t *bssid = WiFi.BSSID();
+            if (bssid != nullptr) {
+                memcpy(cached_wifi_bssid, bssid, 6);
+                cached_wifi_valid = true;
+                Log_info("RTC WiFi cache: saved ch:%d BSSID:%02X:%02X:%02X:%02X:%02X:%02X",
+                         cached_wifi_channel,
+                         cached_wifi_bssid[0], cached_wifi_bssid[1], cached_wifi_bssid[2],
+                         cached_wifi_bssid[3], cached_wifi_bssid[4], cached_wifi_bssid[5]);
+            }
+
             if (last_used_index >= 0)
             {
                 saveLastUsedWifiIndex(last_used_index);

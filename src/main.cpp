@@ -2,8 +2,10 @@
 #include "bl.h"
 #include "esp_ota_ops.h"
 #include "qa.h"
+#ifndef ECHO_DISABLE_MQTT_SPRITES
 #include "mqtt_sprite.h"
 #include "sprite_renderer.h"
+#endif
 #include "mdns_discovery.h"
 
 
@@ -19,17 +21,20 @@ void setup()
   // Initialize mDNS discovery for local TRMNL servers
   mdns_discovery_init();
 
+#ifndef ECHO_DISABLE_MQTT_SPRITES
   // Initialize MQTT sprite system
   mqtt_sprite_init();
 
   // Initialize sprite renderer
   sprite_renderer_init();
+#endif
 }
 
 void loop()
 {
   bl_process();
 
+#ifndef ECHO_DISABLE_MQTT_SPRITES
   // Handle MQTT sprite messages
   if (mqtt_sprite_loop()) {
     // New sprite message received
@@ -50,6 +55,7 @@ void loop()
 
   // Update sprite animations
   sprite_update_animation();
+#endif
 
   // Periodically scan for local TRMNL servers (every 60 seconds)
   static unsigned long last_mdns_scan = 0;
