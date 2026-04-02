@@ -3,6 +3,8 @@
  * @brief MQTT-based sprite display system implementation
  */
 
+#ifndef ECHO_DISABLE_MQTT_SPRITES
+
 #include "mqtt_sprite.h"
 #include "config.h"
 #include <WiFi.h>
@@ -299,3 +301,5 @@ void mqtt_sprite_set_enabled(bool enabled) {
 bool mqtt_sprite_is_enabled(void) {
     return mqtt_enabled;
 }
+
+#endif // ECHO_DISABLE_MQTT_SPRITES

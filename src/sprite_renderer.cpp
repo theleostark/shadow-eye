@@ -3,6 +3,8 @@
  * @brief Sprite rendering system implementation
  */
 
+#ifndef ECHO_DISABLE_MQTT_SPRITES
+
 #include "sprite_renderer.h"
 #include "sprite_data.h"
 #include "display.h"
@@ -396,3 +398,5 @@ void sprite_set_size(uint16_t width, uint16_t height) {
     sprite_config.width = width;
     sprite_config.height = height;
 }
+
+#endif // ECHO_DISABLE_MQTT_SPRITES
